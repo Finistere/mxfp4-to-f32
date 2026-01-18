@@ -39,6 +39,15 @@ def _case_data() -> dict[str, np.ndarray]:
             ),
             dtype=np.float32,
         ),
+        "multiple_blocks": np.array(
+            np.concatenate(
+                [
+                    np.full(32, 1e-2, dtype=np.float32),
+                    np.full(32, 1e2, dtype=np.float32),
+                ]
+            ),
+            dtype=np.float32,
+        )
     }
 
 
@@ -49,8 +58,8 @@ def main() -> None:
         q = quantize(data, QTYPE)
         dq = dequantize(q, QTYPE)
 
-        q_path = OUT_DIR / f"{name}.mxfp4.bin"
-        dq_path = OUT_DIR / f"{name}.f32.bin"
+        q_path = OUT_DIR / f"{name}.mxfp4"
+        dq_path = OUT_DIR / f"{name}.f32"
 
         _write_bin(q_path, q)
         _write_bin(dq_path, dq)
