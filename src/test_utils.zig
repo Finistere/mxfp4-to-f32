@@ -12,7 +12,7 @@ pub const TestCase = struct {
     }
 };
 
-pub fn loadTestCase(alloc: std.mem.Allocator) !std.ArrayList(TestCase) {
+pub fn loadTestCases(alloc: std.mem.Allocator) !std.ArrayList(TestCase) {
     var dir = try std.fs.cwd().openDir("cases", .{ .iterate = true });
     defer dir.close();
 
@@ -49,15 +49,11 @@ pub fn loadTestCase(alloc: std.mem.Allocator) !std.ArrayList(TestCase) {
 
 test "Can load test cases" {
     const gpa = std.testing.allocator;
-    var test_cases = try loadTestCase(gpa);
+    var test_cases = try loadTestCases(gpa);
     defer {
         for (test_cases.items) |*tc| {
             tc.deinit(gpa);
         }
         test_cases.deinit(gpa);
-    }
-
-    for (test_cases.items) |tc| {
-        std.debug.print("=== {s} ===\n{any}\n\n", .{ tc.name, tc.f32 });
     }
 }
