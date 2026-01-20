@@ -6,13 +6,13 @@ const MXFP4_VALUES_PER_BLOCK = 32;
 
 // https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
 const SimpleMxfp4Reader = struct {
-    block_reader: std.io.Reader,
-    scale_reader: std.io.Reader,
+    blocks_reader: *std.io.Reader,
+    scales_reader: *std.io.Reader,
     fp4_block: [MXFP4_BLOCK_BYTES_SIZE]u8,
     f32_block: [MXFP4_VALUES_PER_BLOCK]f32,
     interface: std.io.Reader,
 
-    pub fn init(block_reader: std.io.Reader, scale_reader: std.io.Reader, buffer: []u8, comptime endianness: std.builtin.Endian) SimpleMxfp4Reader {
+    pub fn init(blocks_reader: *std.io.Reader, scales_reader: *std.io.Reader, buffer: []u8, comptime endianness: std.builtin.Endian) SimpleMxfp4Reader {
         if (buffer.len < MXFP4_VALUES_PER_BLOCK * @sizeOf(f32)) @panic("Buffer must be at least 128 bits big to contain all values from a single block.");
         // We ensure with the parameter that the caller is aware of how we expose the f32 as bytes. Little-endian will be most likely what's needed
         // and it's used by most modern arch, but better safe than sorry.
@@ -24,14 +24,14 @@ const SimpleMxfp4Reader = struct {
             .seek = 0,
             .end = 0,
         };
-        return SimpleMxfp4Reader{ .block_reader = block_reader, .scale_reader = scale_reader, .fp4_block = undefined, .f32_block = undefined, .interface = reader };
+        return SimpleMxfp4Reader{ .blocks_reader = blocks_reader, .scales_reader = scales_reader, .fp4_block = undefined, .f32_block = undefined, .interface = reader };
     }
 
     fn stream(r: *std.io.Reader, w: *std.io.Writer, limit: std.io.Limit) std.io.Reader.StreamError!usize {
         const self: *SimpleMxfp4Reader = @fieldParentPtr("interface", r);
 
-        const scale: u8 = try self.scale_reader.takeByte();
-        try self.block_reader.readSliceAll(&self.fp4_block);
+        const scale: u8 = try self.scales_reader.takeByte();
+        try self.blocks_reader.readSliceAll(&self.fp4_block);
         dequantize(scale, &self.fp4_block, &self.f32_block);
 
         // Here we do assume that we want the current arch endianness which we checked in the init() function.
@@ -101,13 +101,88 @@ test "Can read MXFP4 from test cases" {
 
     for (test_cases.items) |test_case| {
         std.debug.print("Running test case: {s}\n", .{test_case.name});
-        const scale_reader = std.io.Reader.fixed(test_case.scales_bytes);
-        const block_reader = std.io.Reader.fixed(test_case.blocks_bytes);
-        var reader = SimpleMxfp4Reader.init(block_reader, scale_reader, buffer, .little);
+        var scale_reader = std.io.Reader.fixed(test_case.scales_bytes);
+        var block_reader = std.io.Reader.fixed(test_case.blocks_bytes);
+        var reader = SimpleMxfp4Reader.init(&block_reader, &scale_reader, buffer, .little);
         const out = try gpa.alignedAlloc(u8, .@"4", test_case.f32.len * 4);
         defer gpa.free(out);
         try reader.interface.readSliceAll(out);
         const f32_data: []const f32 = std.mem.bytesAsSlice(f32, out);
         try std.testing.expectEqualSlices(f32, test_case.f32, f32_data);
     }
+}
+
+const TENSOR_NAME = "block.0.mlp.mlp1_weight";
+
+test "Can read GPT-OSS weights" {
+    const gpa = std.testing.allocator;
+    var dir = try std.fs.cwd().openDir("data", .{});
+    defer dir.close();
+
+    const scales_buffer = try gpa.alloc(u8, 128);
+    defer gpa.free(scales_buffer);
+    const scales_filename = try std.mem.concat(gpa, u8, &.{ TENSOR_NAME, ".scales.bin" });
+    defer gpa.free(scales_filename);
+    const scales_file = try dir.openFile(scales_filename, .{});
+    defer scales_file.close();
+    var scales_reader = scales_file.reader(scales_buffer);
+
+    const blocks_buffer = try gpa.alloc(u8, 128);
+    defer gpa.free(blocks_buffer);
+    const blocks_filename = try std.mem.concat(gpa, u8, &.{ TENSOR_NAME, ".blocks.bin" });
+    defer gpa.free(blocks_filename);
+    const blocks_file = try dir.openFile(blocks_filename, .{});
+    defer blocks_file.close();
+    var blocks_reader = blocks_file.reader(blocks_buffer);
+
+    const expected_buffer = try gpa.alloc(u8, 128);
+    defer gpa.free(expected_buffer);
+    const expected_filename = try std.mem.concat(gpa, u8, &.{ TENSOR_NAME, ".f32.bin" });
+    defer gpa.free(expected_filename);
+    const expected_file = try dir.openFile(expected_filename, .{});
+    defer expected_file.close();
+    var expected_reader = expected_file.reader(expected_buffer);
+
+    const buffer = try gpa.alloc(u8, 128);
+    defer gpa.free(buffer);
+    var reader = SimpleMxfp4Reader.init(&blocks_reader.interface, &scales_reader.interface, buffer, .little);
+
+    const result = try gpa.alignedAlloc(u8, .@"4", 128);
+    defer gpa.free(result);
+    const expected = try gpa.alignedAlloc(u8, .@"4", 128);
+    defer gpa.free(expected);
+
+    var pos: usize = 0;
+    while (true) {
+        _ = reader.interface.readSliceAll(result) catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => return err,
+        };
+        try expected_reader.interface.readSliceAll(expected);
+        const f32_result: []const f32 = std.mem.bytesAsSlice(f32, result);
+        const f32_expected: []const f32 = std.mem.bytesAsSlice(f32, expected);
+        for (
+            f32_result,
+            f32_expected,
+        ) |res, exp| {
+            if (res != exp) {
+                const scale_byte: u8 = try readAt(dir, scales_filename, pos);
+                const block_byte: u8 = try readAt(dir, blocks_filename, pos / 2);
+                std.debug.print(
+                    "Mismatch at position {d} : expected {d}, got {d}; scale byte {b}, block byte {b}\n",
+                    .{ pos, exp, res, scale_byte, block_byte },
+                );
+                @panic("");
+            }
+            pos += 1;
+        }
+    }
+}
+
+fn readAt(dir: std.fs.Dir, name: []u8, pos: usize) !u8 {
+    const f = try dir.openFile(name, .{});
+    defer f.close();
+    var reader = f.reader(&.{});
+    try reader.seekTo(@as(u64, pos));
+    return reader.interface.takeByte();
 }
