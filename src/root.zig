@@ -114,38 +114,44 @@ test "Can read MXFP4 from test cases" {
 
 const TENSOR_NAME = "block.0.mlp.mlp1_weight";
 
+const BinReader = struct {
+    file: std.fs.File,
+    filename: []u8,
+    buffer: []u8,
+    reader: std.fs.File.Reader,
+
+    pub fn init(alloc: std.mem.Allocator, dir: std.fs.Dir, name: []const u8) !BinReader {
+        const filename = try std.mem.concat(alloc, u8, &.{ TENSOR_NAME, ".", name, ".bin" });
+        var file = try dir.openFile(filename, .{});
+        const buffer = try alloc.alloc(u8, 128);
+        const reader = file.reader(buffer);
+        return BinReader{ .file = file, .filename = filename, .buffer = buffer, .reader = reader };
+    }
+
+    pub fn deinit(self: *BinReader, alloc: std.mem.Allocator) void {
+        self.file.close();
+        alloc.free(self.filename);
+        alloc.free(self.buffer);
+    }
+};
+
 test "Can read GPT-OSS weights" {
     const gpa = std.testing.allocator;
     var dir = try std.fs.cwd().openDir("data", .{});
     defer dir.close();
 
-    const scales_buffer = try gpa.alloc(u8, 128);
-    defer gpa.free(scales_buffer);
-    const scales_filename = try std.mem.concat(gpa, u8, &.{ TENSOR_NAME, ".scales.bin" });
-    defer gpa.free(scales_filename);
-    const scales_file = try dir.openFile(scales_filename, .{});
-    defer scales_file.close();
-    var scales_reader = scales_file.reader(scales_buffer);
+    var scales_bin = try BinReader.init(gpa, dir, "scales");
+    defer scales_bin.deinit(gpa);
 
-    const blocks_buffer = try gpa.alloc(u8, 128);
-    defer gpa.free(blocks_buffer);
-    const blocks_filename = try std.mem.concat(gpa, u8, &.{ TENSOR_NAME, ".blocks.bin" });
-    defer gpa.free(blocks_filename);
-    const blocks_file = try dir.openFile(blocks_filename, .{});
-    defer blocks_file.close();
-    var blocks_reader = blocks_file.reader(blocks_buffer);
+    var blocks_bin = try BinReader.init(gpa, dir, "blocks");
+    defer blocks_bin.deinit(gpa);
 
-    const expected_buffer = try gpa.alloc(u8, 128);
-    defer gpa.free(expected_buffer);
-    const expected_filename = try std.mem.concat(gpa, u8, &.{ TENSOR_NAME, ".f32.bin" });
-    defer gpa.free(expected_filename);
-    const expected_file = try dir.openFile(expected_filename, .{});
-    defer expected_file.close();
-    var expected_reader = expected_file.reader(expected_buffer);
+    var expected_bin = try BinReader.init(gpa, dir, "f32");
+    defer expected_bin.deinit(gpa);
 
     const buffer = try gpa.alloc(u8, 128);
     defer gpa.free(buffer);
-    var reader = SimpleMxfp4Reader.init(&blocks_reader.interface, &scales_reader.interface, buffer, .little);
+    var reader = SimpleMxfp4Reader.init(&blocks_bin.reader, &scales_bin.reader, buffer, .little);
 
     const result = try gpa.alignedAlloc(u8, .@"4", 128);
     defer gpa.free(result);
@@ -158,7 +164,7 @@ test "Can read GPT-OSS weights" {
             error.EndOfStream => break,
             else => return err,
         };
-        try expected_reader.interface.readSliceAll(expected);
+        try expected_bin.reader.readSliceAll(expected);
         const f32_result: []const f32 = std.mem.bytesAsSlice(f32, result);
         const f32_expected: []const f32 = std.mem.bytesAsSlice(f32, expected);
         for (
@@ -166,8 +172,8 @@ test "Can read GPT-OSS weights" {
             f32_expected,
         ) |res, exp| {
             if (res != exp) {
-                const scale_byte: u8 = try readAt(dir, scales_filename, pos);
-                const block_byte: u8 = try readAt(dir, blocks_filename, pos / 2);
+                const scale_byte: u8 = try readAt(dir, scales_bin.filename, pos);
+                const block_byte: u8 = try readAt(dir, blocks_bin.filename, pos / 2);
                 std.debug.print(
                     "Mismatch at position {d} : expected {d}, got {d}; scale byte {b}, block byte {b}\n",
                     .{ pos, exp, res, scale_byte, block_byte },
