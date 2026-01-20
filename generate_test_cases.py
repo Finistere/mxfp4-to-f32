@@ -1,14 +1,42 @@
-#!/usr/bin/env python3
-"""Generate MXFP4 quantize/dequantize fixtures for a Zig dequantizer."""
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.13"
+# dependencies = [
+#     "numpy>=2.4.1",
+#     "torch>=2.9.1",
+#     "triton",
+#     "triton_kernels",
+# ]
+#
+# [[tool.uv.index]]
+# name = "pytorch-cpu"
+# url = "https://download.pytorch.org/whl/cpu"
+# explicit = true
+#
+# [tool.uv]
+# no-build-isolation-package = ["triton"]
+#
+# [tool.uv.sources]
+# torch = [
+#   { index = "pytorch-cpu" },
+# ]
+# triton_kernels = { path = "triton/python/triton_kernels" }
+# triton = { path = "triton" }
+# ///
+
+"""Generate MXFP4 quantize fixtures using Triton's MXFP4 quantizer."""
+
+import math
+import sys
+import json
 from pathlib import Path
 
 import numpy as np
-from gguf.constants import GGMLQuantizationType
-from gguf.quants import dequantize, quantize
+import torch
 
 
 OUT_DIR = Path("cases")
-QTYPE = GGMLQuantizationType.MXFP4
+MXFP_AXIS = -1
 
 
 def _write_bin(path: Path, array: np.ndarray) -> None:
@@ -47,22 +75,78 @@ def _case_data() -> dict[str, np.ndarray]:
                 ]
             ),
             dtype=np.float32,
-        )
+        ),
     }
 
 
 def main() -> None:
+    from triton_kernels.numerics_details.mxfp import downcast_to_mxfp_torch
+
     OUT_DIR.mkdir(exist_ok=True)
+    manifest: dict[str, list[float]] = {}
 
     for name, data in _case_data().items():
-        q = quantize(data, QTYPE)
-        dq = dequantize(q, QTYPE)
+        x = torch.from_numpy(data)
+        blocks, scales = downcast_to_mxfp_torch(x, torch.uint8, axis=MXFP_AXIS)
 
-        q_path = OUT_DIR / f"{name}.mxfp4"
-        dq_path = OUT_DIR / f"{name}.f32"
+        blocks = blocks.cpu().contiguous()
+        scales = scales.cpu().contiguous()
+        _write_bin(OUT_DIR / f"{name}.blocks.bin", blocks.numpy())
+        _write_bin(OUT_DIR / f"{name}.scales.bin", scales.numpy())
 
-        _write_bin(q_path, q)
-        _write_bin(dq_path, dq)
+        # Re-shaping block to match what the dequantize_mxfp4_blocks expects:
+        # - blocks shape: (..., G, B) where B is bytes per block (16) and G is the number of blocks.
+        # - scales shape: (..., G) — one scale per block. 
+        blocks = blocks.view(scales.numel(), -1)
+        dequant = dequantize_mxfp4_blocks(blocks, scales).cpu().contiguous()
+        _write_bin(OUT_DIR / f"{name}.f32.bin", dequant.numpy())
+        manifest[name] = dequant.numpy().reshape(-1).tolist()
+
+    (OUT_DIR / "expected_values.json").write_text(json.dumps(manifest, indent=2, sort_keys=True))
+
+# Copied from https://github.com/openai/gpt-oss/blob/main/gpt_oss/torch/weights.py
+FP4_VALUES = [
+    +0.0, +0.5, +1.0, +1.5, +2.0, +3.0, +4.0, +6.0,
+    -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0,
+]
+
+def dequantize_mxfp4_blocks(
+    blocks: torch.Tensor,
+    scales: torch.Tensor,
+    *,
+    rows_per_chunk: int = 16384 * 512,
+) -> torch.Tensor:
+    scales = scales.to(torch.int32) - 127
+    if blocks.shape[:-1] != scales.shape:
+        raise ValueError(f"{blocks.shape=} does not match {scales.shape=}")
+
+    lut = torch.tensor(FP4_VALUES, dtype=torch.float32, device=blocks.device)
+
+    *prefix_shape, G, B = blocks.shape
+    rows_total = math.prod(prefix_shape) * G
+
+    blocks = blocks.reshape(rows_total, B)
+    scales = scales.reshape(rows_total, 1)
+
+    out = torch.empty(rows_total, B * 2, dtype=torch.float32, device=blocks.device)
+
+    for r0 in range(0, rows_total, rows_per_chunk):
+        r1 = min(r0 + rows_per_chunk, rows_total)
+
+        blk = blocks[r0:r1]
+        exp = scales[r0:r1]
+
+        idx_lo = (blk & 0x0F).to(torch.long)
+        idx_hi = (blk >> 4).to(torch.long)
+
+        sub = out[r0:r1]
+        sub[:, 0::2] = lut[idx_lo]
+        sub[:, 1::2] = lut[idx_hi]
+
+        torch.ldexp(sub, exp, out=sub)
+        del idx_lo, idx_hi, blk, exp
+
+    return out.reshape(*prefix_shape, G, B * 2).view(*prefix_shape, G * B * 2)
 
 
 if __name__ == "__main__":

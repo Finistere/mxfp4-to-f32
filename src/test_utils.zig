@@ -1,45 +1,52 @@
 const std = @import("std");
 
+const CASES_DIR = "cases";
+const MAX_BYTES = 1 << 20; // 1 MiB
+
 pub const TestCase = struct {
     name: []const u8,
-    mxfp4_bytes: []u8,
+    blocks_bytes: []u8,
+    scales_bytes: []u8,
     f32: []f32,
-
-    pub fn deinit(self: *TestCase, alloc: std.mem.Allocator) void {
-        alloc.free(self.name);
-        alloc.free(self.mxfp4_bytes);
-        alloc.free(self.f32);
-    }
 };
 
-pub fn loadTestCases(alloc: std.mem.Allocator) !std.ArrayList(TestCase) {
-    var dir = try std.fs.cwd().openDir("cases", .{ .iterate = true });
+pub fn loadTestCases(arena: *std.heap.ArenaAllocator) !std.ArrayList(TestCase) {
+    const alloc = arena.allocator();
+
+    var dir = try std.fs.cwd().openDir(CASES_DIR, .{ .iterate = true });
     defer dir.close();
 
     var it = dir.iterate();
     var cases = try std.ArrayList(TestCase).initCapacity(alloc, 32);
     while (try it.next()) |entry| {
         if (entry.kind != .file) continue;
-        if (!std.mem.endsWith(u8, entry.name, ".f32")) continue;
+        if (!std.mem.endsWith(u8, entry.name, ".f32.bin")) continue;
         const f32_filename = entry.name;
-
-        // We must have a dot because this file ends with ".f32"
-        const dot = std.mem.lastIndexOfScalar(u8, f32_filename, '.') orelse unreachable;
-        const name = try alloc.dupe(u8, f32_filename[0..dot]);
-        const mxfp4_filename = try std.mem.concat(alloc, u8, &.{ name, ".mxfp4" });
-        defer alloc.free(mxfp4_filename);
-
-        const max_bytes = 1 << 20; // 1 MiB
-        const mxfp4_bytes = try dir.readFileAlloc(alloc, mxfp4_filename, max_bytes);
-        const f32_bytes = try dir.readFileAllocOptions(alloc, f32_filename, max_bytes, null, .of(f32), null);
+        const name = try alloc.dupe(u8, f32_filename[0 .. f32_filename.len - ".f32.bin".len]);
+        const f32_bytes = try dir.readFileAllocOptions(alloc, f32_filename, MAX_BYTES, null, .of(f32), null);
         if (f32_bytes.len % 4 != 0) {
             @panic("f32 file length is not a multiple of 4");
         }
         const f32_data: []f32 = std.mem.bytesAsSlice(f32, f32_bytes);
 
+        const scales_filename = try std.mem.concat(alloc, u8, &.{ name, ".scales.bin" });
+        defer alloc.free(scales_filename);
+        const scales_bytes = try dir.readFileAlloc(alloc, scales_filename, MAX_BYTES);
+        if (scales_bytes.len * 32 != f32_data.len) {
+            @panic("scales file length does not match f32 data length");
+        }
+
+        const blocks_filename = try std.mem.concat(alloc, u8, &.{ name, ".blocks.bin" });
+        defer alloc.free(blocks_filename);
+        const blocks_bytes = try dir.readFileAlloc(alloc, blocks_filename, MAX_BYTES);
+        if (blocks_bytes.len * 2 != f32_data.len) {
+            @panic("blocks file length does not match f32 data length");
+        }
+
         try cases.append(alloc, TestCase{
             .name = name,
-            .mxfp4_bytes = mxfp4_bytes,
+            .blocks_bytes = blocks_bytes,
+            .scales_bytes = scales_bytes,
             .f32 = f32_data,
         });
     }
@@ -47,13 +54,62 @@ pub fn loadTestCases(alloc: std.mem.Allocator) !std.ArrayList(TestCase) {
     return cases;
 }
 
-test "Can load test cases" {
-    const gpa = std.testing.allocator;
-    var test_cases = try loadTestCases(gpa);
-    defer {
-        for (test_cases.items) |*tc| {
-            tc.deinit(gpa);
+const ExpectedValues = struct {
+    case_name_to_values: std.StringHashMap([]f32),
+};
+
+fn loadExpectedValues(arena: *std.heap.ArenaAllocator) !ExpectedValues {
+    const arena_alloc = arena.allocator();
+
+    var dir = try std.fs.cwd().openDir(CASES_DIR, .{});
+    defer dir.close();
+
+    const manifest_bytes = try dir.readFileAlloc(arena_alloc, "expected_values.json", MAX_BYTES);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, arena_alloc, manifest_bytes, .{});
+    defer parsed.deinit();
+    try std.testing.expect(parsed.value == .object);
+
+    var map = std.StringHashMap([]f32).init(arena_alloc);
+    var it = parsed.value.object.iterator();
+    while (it.next()) |entry| {
+        const key = entry.key_ptr.*;
+        const value = entry.value_ptr.*;
+        if (value != .array) return error.InvalidManifestEntry;
+
+        const items = value.array.items;
+        const values = try arena_alloc.alloc(f32, items.len);
+        for (items, 0..) |item, idx| {
+            values[idx] = switch (item) {
+                .float => @floatCast(item.float),
+                .integer => @floatFromInt(item.integer),
+                else => return error.InvalidManifestValue,
+            };
         }
-        test_cases.deinit(gpa);
+
+        try map.put(try arena_alloc.dupe(u8, key), values);
+    }
+
+    return ExpectedValues{ .case_name_to_values = map };
+}
+
+test "Test case floats are consistent with expected values." {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
+    const expected = try loadExpectedValues(&arena);
+    const test_cases = try loadTestCases(&arena);
+
+    for (test_cases.items) |tc| {
+        std.debug.print("Validating test case {s}\n", .{tc.name});
+        const entry_opt = expected.case_name_to_values.get(tc.name);
+        try std.testing.expect(entry_opt != null);
+        const values = entry_opt.?;
+        try std.testing.expectEqual(values.len, tc.f32.len);
+
+        for (values, 0..) |value, idx| {
+            try std.testing.expectApproxEqAbs(value, tc.f32[idx], 1e-6);
+        }
     }
 }
