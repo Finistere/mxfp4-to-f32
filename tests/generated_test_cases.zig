@@ -10,7 +10,7 @@ pub const TestCase = struct {
     f32: []f32,
 };
 
-pub fn loadTestCases(arena: *std.heap.ArenaAllocator) !std.ArrayList(TestCase) {
+pub fn load(arena: *std.heap.ArenaAllocator) !std.ArrayList(TestCase) {
     const alloc = arena.allocator();
 
     var dir = try std.fs.cwd().openDir(CASES_DIR, .{ .iterate = true });
@@ -54,11 +54,11 @@ pub fn loadTestCases(arena: *std.heap.ArenaAllocator) !std.ArrayList(TestCase) {
     return cases;
 }
 
-const ExpectedValues = struct {
+pub const ExpectedValues = struct {
     case_name_to_values: std.StringHashMap([]f32),
 };
 
-fn loadExpectedValues(arena: *std.heap.ArenaAllocator) !ExpectedValues {
+pub fn loadExpectedValues(arena: *std.heap.ArenaAllocator) !ExpectedValues {
     const arena_alloc = arena.allocator();
 
     var dir = try std.fs.cwd().openDir(CASES_DIR, .{});
@@ -91,25 +91,4 @@ fn loadExpectedValues(arena: *std.heap.ArenaAllocator) !ExpectedValues {
     }
 
     return ExpectedValues{ .case_name_to_values = map };
-}
-
-test "Test case floats are consistent with expected values." {
-    const gpa = std.testing.allocator;
-    var arena = std.heap.ArenaAllocator.init(gpa);
-    defer arena.deinit();
-
-    const expected = try loadExpectedValues(&arena);
-    const test_cases = try loadTestCases(&arena);
-
-    for (test_cases.items) |tc| {
-        std.debug.print("Validating test case {s}\n", .{tc.name});
-        const entry_opt = expected.case_name_to_values.get(tc.name);
-        try std.testing.expect(entry_opt != null);
-        const values = entry_opt.?;
-        try std.testing.expectEqual(values.len, tc.f32.len);
-
-        for (values, 0..) |value, idx| {
-            try std.testing.expectApproxEqAbs(value, tc.f32[idx], 1e-6);
-        }
-    }
 }

@@ -31,11 +31,17 @@
     // `zig build --fetch` can be used to fetch all dependencies of a package, recursively.
     // Once all dependencies are fetched, `zig build` no longer requires
     // internet connectivity.
-    .dependencies = .{},
+    .dependencies = .{
+        .zbench = .{
+            .url = "https://github.com/hendriknielaender/zbench/archive/refs/tags/v0.11.1.tar.gz",
+            .hash = "zbench-0.11.1-YTdc7zgmAQDtDcHPFwsLeawui27WjMLWmUwrfz7pIlB2",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "src",
+        "tests",
         // For example...
         //"LICENSE",
         //"README.md",

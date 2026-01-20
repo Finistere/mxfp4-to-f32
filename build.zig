@@ -41,6 +41,9 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
 
+    const opts = .{ .target = target, .optimize = optimize };
+    const zbench_module = b.dependency("zbench", opts).module("zbench");
+
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function
     // to the module defined above, it's sometimes preferable to split business
@@ -63,7 +66,7 @@ pub fn build(b: *std.Build) void {
             // b.createModule defines a new module just like b.addModule but,
             // unlike b.addModule, it does not expose the module to consumers of
             // this package, which is why in this case we don't have to give it a name.
-            .root_source_file = b.path("src/main.zig"),
+            .root_source_file = b.path("src/benchmark.zig"),
             // Target and optimization levels must be explicitly wired in when
             // defining an executable or library (in the root module), and you
             // can also hardcode a specific target for an executable or library
@@ -82,6 +85,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    exe.root_module.addImport("zbench", zbench_module);
 
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default
@@ -94,7 +98,7 @@ pub fn build(b: *std.Build) void {
     // This will evaluate the `run` step rather than the default step.
     // For a top level step to actually do something, it must depend on other
     // steps (e.g. a Run step, as we will see in a moment).
-    const run_step = b.step("run", "Run the app");
+    const run_step = b.step("benchmark", "Run the app");
 
     // This creates a RunArtifact step in the build graph. A RunArtifact step
     // invokes an executable compiled by Zig. Steps will only be executed by the
@@ -135,12 +139,26 @@ pub fn build(b: *std.Build) void {
     // A run step that will run the second test executable.
     const run_exe_tests = b.addRunArtifact(exe_tests);
 
+    // Runs integration tests defined in tests/integration.zig.
+    const integration_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/integration.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "mxfp4_to_f32", .module = mod },
+            },
+        }),
+    });
+    const run_integration_tests = b.addRunArtifact(integration_tests);
+
     // A top level step for running all tests. dependOn can be called multiple
     // times and since the two run steps do not depend on one another, this will
     // make the two of them run in parallel.
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+    test_step.dependOn(&run_integration_tests.step);
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //
