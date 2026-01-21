@@ -2,7 +2,9 @@
 
 Zig `std.io.Reader` for MXFP4 encoded F32 gpt-oss tensors.
 
-The whole environment is configured with devenv (Nix).
+## Setup
+
+There is a devenv (Nix) but in short you'll need `zig`, `python` and `uv` and a environment that works for python packages (can compile C libs).
 
 ## Tests
 
