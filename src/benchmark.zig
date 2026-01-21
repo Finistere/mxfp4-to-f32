@@ -5,6 +5,7 @@ const mxfp4 = @import("mxfp4");
 const SCALES_BYTES = 64 * 1024;
 const BLOCKS_BYTES = 1024 * 1024;
 
+/// Benchmark reading 2M floats (64K scales and 1M blocks) which should fit in L3 cache.
 const L3CacheReaderBench = struct {
     scales: []const u8,
     blocks: []const u8,
@@ -48,6 +49,7 @@ const L3CacheReaderBench = struct {
     }
 };
 
+/// Benchmark reading 530M floats from disk.
 fn gpt_oss_tensor_reader_bench(alloc: std.mem.Allocator) void {
     faillible_gpt_oss_tensor_reader_bench(alloc) catch @panic("Bench failure");
 }
@@ -77,6 +79,7 @@ fn faillible_gpt_oss_tensor_reader_bench(alloc: std.mem.Allocator) !void {
     }
 }
 
+/// Benchmark dequantization of a single block using SSSE3.
 const DequantizeSSSE3Bench = struct {
     scale: u8,
     block: []const u8,
@@ -102,6 +105,7 @@ const DequantizeSSSE3Bench = struct {
     }
 };
 
+/// Benchmark dequantization of a single block using scalar code.
 const DequantizeBench = struct {
     scale: u8,
     block: []const u8,
@@ -170,8 +174,6 @@ fn loadPrefix(alloc: std.mem.Allocator, dir: std.fs.Dir, filename: []const u8, l
     try reader.interface.readSliceAll(out);
     return out;
 }
-
-const TENSOR_NAME = "block.0.mlp.mlp1_weight";
 
 const BinReader = struct {
     file: std.fs.File,

@@ -3,15 +3,38 @@
 Zig `std.io.Reader` for MXFP4 quantized F32 [gpt-oss](https://github.com/openai/gpt-oss) tensors.
 
 The specification for MXFP4 can be found here: https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf.
-It does _not_ specify how data is stored though.
+It does _not_ specify how data is stored, so this implementation is specific to GPT-OSS tensor layout.
 
-The benchmark show a throughput of ~3.4 GB/s but it's very dependent on buffer sizes.
+The benchmark shows a throughput of ~3.4 GB/s but it's very dependent on buffer sizes. In my `std.io.Reader` implementation I'm relying on the nested Reader buffer and output buffer to be big enough that I can decode multiple blocks at once for good performance. It's a debatable choice, depends who is the consumer (internal lib for one project vs public lib) and how it's meant to be used.
+
+## Usage
+
+```zig
+const std = @import("std");
+const mxfp4 = @import("mxfp4");
+
+var scale_reader = std.io.Reader.fixed(scales_bytes);
+var block_reader = std.io.Reader.fixed(blocks_bytes);
+var reader_buffer: [1024]u8 = undefined;
+var reader = mxfp4.io.GptOssReader.init(
+    &block_reader,
+    &scale_reader,
+    &reader_buffer,
+    .little,
+);
+
+var out: [16 * 1024]u8 = undefined;
+try reader.interface.readSliceAll(&out);
+```
+
+## Requirements
+
+- Native endianness only (pass the host endianness to `GptOssReader.init`).
+- SSSE3 is used when available on x86/x86_64; scalar fallback otherwise.
 
 ## Setup
 
-There is a devenv (Nix) but in short you'll need `zig`, `python` and `uv` and a environment that works for python packages (can compile C libs).
-
-Create a venv and install Triton's build dependencies:
+There is a devenv (Nix) but in short you'll need `zig`, `python` and `uv` and an environment that works for Python packages (can compile C libs).
 
 Download the gpt-oss-20b tensors:
 
@@ -22,7 +45,7 @@ huggingface-cli download openai/gpt-oss-20b --include "original/*" --local-dir g
 Now you can run:
 
 ```sh
-# Creates the /data dir with one extract GPT-OSS tensor.
+# Creates the data/ dir with one extracted GPT-OSS tensor.
 ./extract_gptoss_tensors.py
 ```
 
@@ -30,10 +53,24 @@ The test cases are committed to git, they're small enough and running `./generat
 
 ## Tests
 
-There 2 kinds of tests, both inspired from the GPT-OSS code:
+There are 2 kinds of tests, both inspired from the GPT-OSS code:
 
 - simple generated ones with `generated_test_cases.py` that uses Triton's MXFP4 quantizer.
 - one of the tensors from GPT-OSS extracted with `extract_gptoss_tensors.py` and dequantized with the Torch specific code in gpt-oss.
+
+Run the tests:
+
+```sh
+zig build test
+```
+
+## Data layout
+
+The GPT-OSS test expects `data/` to contain:
+
+- `block.0.mlp.mlp1_weight.scales.bin`
+- `block.0.mlp.mlp1_weight.blocks.bin`
+- `block.0.mlp.mlp1_weight.f32.bin`
 
 ## Benchmarks
 

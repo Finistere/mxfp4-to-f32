@@ -11,7 +11,6 @@ test "Test case floats are consistent with expected values." {
     const test_cases = try generated_test_cases.load(&arena);
 
     for (test_cases.items) |tc| {
-        std.debug.print("Validating test case {s}\n", .{tc.name});
         const entry_opt = expected.case_name_to_values.get(tc.name);
         try std.testing.expect(entry_opt != null);
         const values = entry_opt.?;
@@ -34,7 +33,6 @@ test "Can read MXFP4 from test cases" {
     defer gpa.free(buffer);
 
     for (test_cases.items) |test_case| {
-        std.debug.print("Running test case: {s}\n", .{test_case.name});
         var scale_reader = std.io.Reader.fixed(test_case.scales_bytes);
         var block_reader = std.io.Reader.fixed(test_case.blocks_bytes);
         var reader = mxfp4.io.GptOssReader.init(&block_reader, &scale_reader, buffer, .little);
