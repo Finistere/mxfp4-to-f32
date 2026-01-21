@@ -40,18 +40,20 @@ pub const Mxfp4Reader = struct {
         // Otherwise we would need to use the writeInt function when it differs which likely has some extra cost.
         const bytes: []const u8 = std.mem.sliceAsBytes(&self.f32_block);
 
-        const n = limit.minInt(bytes.len);
-        try w.writeAll(bytes[0..n]);
-        const remaining = bytes.len - n;
-
-        if (remaining > 0) {
-            if (remaining > r.buffer.len - r.end) {
-                return error.ReadFailed;
-            }
-            @memcpy(r.buffer[r.seek .. r.seek + remaining], bytes[n..]);
-            r.end += remaining;
+        const l: usize = @intFromEnum(limit);
+        switch (std.math.order(l, bytes.len)) {
+            .lt => {
+                try w.writeAll(bytes[0..l]);
+                const remaining = bytes.len - l;
+                if (remaining > r.buffer.len - r.end) return error.ReadFailed;
+                @memcpy(r.buffer[r.seek .. r.seek + remaining], bytes[l..]);
+                r.end += remaining;
+                return l;
+            },
+            else => {
+                try w.writeAll(bytes);
+                return bytes.len;
+            },
         }
-
-        return n;
     }
 };

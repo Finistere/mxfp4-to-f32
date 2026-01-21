@@ -56,7 +56,9 @@ pub fn main() !void {
 
     try writer.print("Running mxfp4 reader benchmark...\n", .{});
 
-    var bench = zbench.Benchmark.init(allocator, .{});
+    var bench = zbench.Benchmark.init(allocator, .{
+        .time_budget_ns = 4 * 1_000_000_000,
+    });
     defer bench.deinit();
     try bench.addParam("2M floats", &bench_impl, .{});
     try bench.run(writer);
