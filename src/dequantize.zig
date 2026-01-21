@@ -69,12 +69,6 @@ const HIGH_SHIFT: @Vector(16, u3) = @splat(4);
 // https://www.felixcloutier.com/x86/pshufb (SSE3)
 // Performs a byte-wise shuffle of the first operand (table) according to the indices specified in the second operand (mask).
 fn pshufb(table: @Vector(16, i8), mask: @Vector(16, u8)) @Vector(16, i8) {
-    comptime {
-        const arch = builtin.target.cpu.arch;
-        if (arch != .x86 and arch != .x86_64) {
-            @compileError("pshufb requires x86/x86_64 (SSSE3)");
-        }
-    }
     var dst = table;
     asm volatile ("pshufb %[mask], %[dst]"
         : [dst] "+x" (dst), // input/output
