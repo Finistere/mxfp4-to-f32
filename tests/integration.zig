@@ -37,7 +37,7 @@ test "Can read MXFP4 from test cases" {
         std.debug.print("Running test case: {s}\n", .{test_case.name});
         var scale_reader = std.io.Reader.fixed(test_case.scales_bytes);
         var block_reader = std.io.Reader.fixed(test_case.blocks_bytes);
-        var reader = mxfp4.io.Reader.init(&block_reader, &scale_reader, buffer, .little);
+        var reader = mxfp4.io.GptOssReader.init(&block_reader, &scale_reader, buffer, .little);
         const out = try gpa.alignedAlloc(u8, .@"4", test_case.f32.len * 4);
         defer gpa.free(out);
         try reader.interface.readSliceAll(out);
@@ -62,7 +62,7 @@ test "Can read GPT-OSS weights" {
 
     const buffer = try gpa.alloc(u8, 1024);
     defer gpa.free(buffer);
-    var reader = mxfp4.io.Reader.init(&blocks_bin.reader.interface, &scales_bin.reader.interface, buffer, .little);
+    var reader = mxfp4.io.GptOssReader.init(&blocks_bin.reader.interface, &scales_bin.reader.interface, buffer, .little);
 
     const result = try gpa.alignedAlloc(u8, .@"4", 1024);
     defer gpa.free(result);

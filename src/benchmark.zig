@@ -25,9 +25,9 @@ const L3CacheReaderBench = struct {
         var block_reader = std.io.Reader.fixed(self.blocks);
 
         var reader_buffer: [1024]u8 = undefined;
-        var read_buffer: [1024]u8 = undefined;
+        var read_buffer: [16 * 1024]u8 = undefined;
 
-        var reader = mxfp4.io.Reader.init(
+        var reader = mxfp4.io.GptOssReader.init(
             &block_reader,
             &scale_reader,
             &reader_buffer,
@@ -64,9 +64,9 @@ fn faillible_gpt_oss_tensor_reader_bench(alloc: std.mem.Allocator) !void {
 
     const buffer = try alloc.alloc(u8, 1024);
     defer alloc.free(buffer);
-    var reader = mxfp4.io.Reader.init(&blocks_bin.reader.interface, &scales_bin.reader.interface, buffer, .little);
+    var reader = mxfp4.io.GptOssReader.init(&blocks_bin.reader.interface, &scales_bin.reader.interface, buffer, .little);
 
-    const result = try alloc.alignedAlloc(u8, .@"4", 8192);
+    const result = try alloc.alignedAlloc(u8, .@"4", 16 * 1024);
     defer alloc.free(result);
 
     while (true) {
@@ -90,9 +90,11 @@ const DequantizeSSSE3Bench = struct {
     }
 
     pub fn run(self: *DequantizeSSSE3Bench, _: std.mem.Allocator) void {
+        var x: @Vector(32, f32) = undefined;
         for (0..1000_000) |_| {
-            std.mem.doNotOptimizeAway(mxfp4.dequantize.one_block_ssse3(self.scale, self.block[0..16].*));
+            x = mxfp4.dequantize.gpt_oss_one_block_ssse3(self.scale, self.block[0..16].*);
         }
+        std.mem.doNotOptimizeAway(x);
     }
 
     pub fn deinit(self: DequantizeSSSE3Bench, alloc: std.mem.Allocator) void {
@@ -115,9 +117,9 @@ const DequantizeBench = struct {
     pub fn run(self: *DequantizeBench, _: std.mem.Allocator) void {
         var f32_output: [32]f32 = undefined;
         for (0..1000_000) |_| {
-            mxfp4.dequantize.one_block(self.scale, self.block[0..16].*, &f32_output);
-            std.mem.doNotOptimizeAway(f32_output);
+            mxfp4.dequantize.gpt_oss_one_block(self.scale, self.block[0..16].*, &f32_output);
         }
+        std.mem.doNotOptimizeAway(f32_output);
     }
 
     pub fn deinit(self: DequantizeBench, alloc: std.mem.Allocator) void {

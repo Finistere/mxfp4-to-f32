@@ -1,10 +1,32 @@
 # mxfp4-to-f32
 
-Zig `std.io.Reader` for MXFP4 encoded F32 gpt-oss tensors.
+Zig `std.io.Reader` for MXFP4 quantized F32 [gpt-oss](https://github.com/openai/gpt-oss) tensors.
+
+The specification for MXFP4 can be found here: https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf.
+It does _not_ specify how data is stored though.
+
+The benchmark show a throughput of ~3.4 GB/s but it's very dependent on buffer sizes.
 
 ## Setup
 
 There is a devenv (Nix) but in short you'll need `zig`, `python` and `uv` and a environment that works for python packages (can compile C libs).
+
+Create a venv and install Triton's build dependencies:
+
+Download the gpt-oss-20b tensors:
+
+```sh
+huggingface-cli download openai/gpt-oss-20b --include "original/*" --local-dir gpt-oss-20b/
+```
+
+Now you can run:
+
+```sh
+# Creates the /data dir with one extract GPT-OSS tensor.
+./extract_gptoss_tensors.py
+```
+
+The test cases are committed to git, they're small enough and running `./generated_test_cases.py` is painful because of Triton and Python. I only get it to work with `uv`, when first installing all dependencies except triton ones and only then re-adding them. `uv` creates a dedicated venv for the script, so `no-build-isolation` applies to the venv and `extra-build-dependencies` doesn't seem to work. Beware that the installation of `triton-kenerls` requires some time compiling.
 
 ## Tests
 
@@ -13,7 +35,20 @@ There 2 kinds of tests, both inspired from the GPT-OSS code:
 - simple generated ones with `generated_test_cases.py` that uses Triton's MXFP4 quantizer.
 - one of the tensors from GPT-OSS extracted with `extract_gptoss_tensors.py` and dequantized with the Torch specific code in gpt-oss.
 
-## Benchmark
+## Benchmarks
+
+The first bench loads 1MB of blocks and 64KB of scales into memory, which fits into L3. The second reads 265MB of values and 17MB of scales from disk which ends up generating 2.1GB of floats. In practice it likely reads from RAM though. Both use 16KB buffers. `Scalar` and `SSSE3` both correspond to 1 million blocks dequantization.
+
+In terms of throughput, for the cpu boost version:
+
+- From disk/ram: 3.39 GB/s
+- From L3: 3.92 GB/s
+- Scalar dequantization: 2.71 GB/s
+- SSSE3 dequantization: 58.2 GB/s
+
+Take those numbers with a big grain of salt though. I'm not super confident in the benchmarks, as in I'm not entirely sure what Zig optimized away despite my best effort with `std.mem.doNotOptimizeAway`. The latter can have a significant impact on performance when placed inside the hot loop, so it's not that easy to interpret those numbers.
+
+However the SSSE3 variant was definitely faster, dequantization many blocks at once helped a lot, limiting the `@memcpy` between buffers also. Given the small difference between the L3 and disk/ram benches, it very likely means that it's the Reader implementation that's slowing all of this down.
 
 ```sh
 zig build -Doptimize=ReleaseFast benchmark
@@ -26,19 +61,19 @@ Linux 6.18.5
 ** WITH CPU BOOST **
 benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
 -----------------------------------------------------------------------------------------------------------------------------
-2M floats (L3 cache)   10254    4.023s         392.376us ± 7.494us   (375.901us ... 515.245us)    396.37us   414.263us  416.808us
-530M floats            50       3.925s         78.517ms ± 1.562ms    (76.602ms ... 81.989ms)      79.326ms   81.989ms   81.989ms
-Scalar                 459      3.97s          8.649ms ± 271.575us   (8.29ms ... 9.846ms)         8.789ms    9.393ms    9.598ms
-SSSE3                  2894     4s             1.382ms ± 6.362us     (1.372ms ... 1.585ms)        1.385ms    1.393ms    1.394ms
+2M floats (L3 cache)   15491    3.955s         255.314us ± 3.149us   (250.834us ... 329.583us)    257.216us  265.632us  267.857us
+530M floats            51       3.904s         76.55ms ± 1.229ms     (75.499ms ... 80.102ms)      77.134ms   80.102ms   80.102ms
+Scalar                 672      3.986s         5.932ms ± 3.316us     (5.925ms ... 5.956ms)        5.932ms    5.946ms    5.95ms
+SSSE3                  14377    3.961s         275.536us ± 2.104us   (274.493us ... 362.051us)    277.469us  278.932us  280.445us
 
 
 ** WITHOUT CPU BOOST **
 benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
 -----------------------------------------------------------------------------------------------------------------------------
-2M floats (L3 cache)   9429     3.997s         423.963us ± 4.22us    (416.538us ... 459.149us)    426.577us  436.095us  438.971us
-530M floats            40       3.934s         98.356ms ± 889.807us  (97.737ms ... 101.381ms)     98.188ms   101.381ms  101.381ms
-Scalar                 367      3.989s         10.87ms ± 299.144us   (10.534ms ... 12.029ms)      10.979ms   11.85ms    11.987ms
-SSSE3                  2206     3.999s         1.813ms ± 5.267us     (1.799ms ... 1.853ms)        1.816ms    1.825ms    1.826ms
+2M floats (L3 cache)   12203    3.997s         327.592us ± 3.087us   (323.512us ... 383.735us)    329.914us  335.525us  337.298us
+530M floats            41       3.99s          97.321ms ± 404.725us  (96.792ms ... 98.107ms)      97.718ms   98.107ms   98.107ms
+Scalar                 518      3.996s         7.714ms ± 8.064us     (7.706ms ... 7.803ms)        7.715ms    7.75ms     7.757ms
+SSSE3                  11058    3.998s         361.601us ± 2.255us   (359.976us ... 390.835us)    363.833us  365.928us  367.951us
 ```
 
 To disable CPU boost on Linux:

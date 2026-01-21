@@ -4,6 +4,12 @@
 # dependencies = [
 #     "numpy>=2.4.1",
 #     "torch>=2.9.1",
+# "setuptools>=40.8.0",
+# "wheel",
+# "cmake>=3.20,<4.0",
+# "ninja>=1.11.1",
+# "pybind11>=2.13.1",
+# "lit",
 #     "triton",
 #     "triton_kernels",
 # ]
@@ -14,7 +20,18 @@
 # explicit = true
 #
 # [tool.uv]
+# no-build-isolation = true
 # no-build-isolation-package = ["triton"]
+#
+# [tool.uv.extra-build-dependencies]
+# triton = [
+# "setuptools>=40.8.0",
+# "wheel",
+# "cmake>=3.20,<4.0",
+# "ninja>=1.11.1",
+# "pybind11>=2.13.1",
+# "lit"
+# ]
 #
 # [tool.uv.sources]
 # torch = [

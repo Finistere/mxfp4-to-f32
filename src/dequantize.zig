@@ -8,7 +8,7 @@ const FP4_VALUES = [_]f32{
 
 // Fastest non-vectorized implementation on x86_64 I've tested.
 // Inspired from https://github.com/openai/gpt-oss/blob/main/gpt_oss/torch/weights.py
-pub fn one_block(scale_e8m0: u8, block: [mxfp4.BLOCK_BYTES_SIZE]u8, output: []f32) void {
+pub fn gpt_oss_one_block(scale_e8m0: u8, block: [mxfp4.BLOCK_BYTES_SIZE]u8, output: []f32) void {
     const scale = e8m0_to_fp32(scale_e8m0);
 
     var i: usize = 0;
@@ -36,7 +36,7 @@ fn e8m0_to_fp32(x: u8) f32 {
 // Inspired from https://github.com/ggml-org/llama.cpp/blob/master/ggml/src/ggml-impl.h#L467
 // Adjusted for SSE3
 //
-pub fn one_block_ssse3(scale_e8m0: u8, block: @Vector(16, u8)) @Vector(32, f32) {
+pub fn gpt_oss_one_block_ssse3(scale_e8m0: u8, block: @Vector(16, u8)) @Vector(32, f32) {
     const scale_half = e8m0_to_fp32_half(scale_e8m0);
 
     const hinibble = block >> HIGH_SHIFT;
