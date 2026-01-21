@@ -66,14 +66,6 @@ Run the tests:
 zig build test
 ```
 
-## Data layout
-
-The GPT-OSS test expects `data/` to contain:
-
-- `block.0.mlp.mlp1_weight.scales.bin`
-- `block.0.mlp.mlp1_weight.blocks.bin`
-- `block.0.mlp.mlp1_weight.f32.bin`
-
 ## Benchmarks
 
 The first bench loads 1MB of blocks and 64KB of scales into memory, which fits into L3. The second reads 265MB of values and 17MB of scales from disk which ends up generating 2.1GB of floats. In practice it likely reads from RAM though. Both use 16KB buffers. `Scalar` and `SSSE3` both correspond to 1 million blocks dequantization.
@@ -123,7 +115,7 @@ echo "0" | sudo tee /sys/devices/system/cpu/cpufreq/boost
 
 ## Profiling
 
-Be sure `strip = false` in `build.zig`.
+Be sure to have `strip = false` in `build.zig`.
 
 ```
 zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux -Dcpu=x86_64_v3 benchmark
