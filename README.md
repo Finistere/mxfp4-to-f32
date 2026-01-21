@@ -5,7 +5,9 @@ Zig `std.io.Reader` for MXFP4 quantized F32 [gpt-oss](https://github.com/openai/
 The specification for MXFP4 can be found here: https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf.
 It does _not_ specify how data is stored, so this implementation is specific to GPT-OSS tensor layout.
 
-The benchmark shows a throughput of ~3.4 GB/s but it's very dependent on buffer sizes. In my `std.io.Reader` implementation I'm relying on the nested Reader buffer and output buffer to be big enough that I can decode multiple blocks at once for good performance. It's a debatable choice, depends who is the consumer (internal lib for one project vs public lib) and how it's meant to be used.
+The benchmark shows a throughput of ~3.4 GB/s but it's very dependent on buffer sizes. In my `std.io.Reader` implementation I'm relying on the nested Reader buffer and output buffer to be big enough that I can decode multiple blocks at once for best performance in the SSSE3 variant. It's a debatable choice, depends who is the consumer (internal lib for one project vs public lib) and how it's meant to be used.
+
+Today the implementation spends a lot of time in `@memcpy`, so that might be improvable, a bit unclear with `std.dio.Reader`.
 
 ## Usage
 
@@ -117,4 +119,13 @@ To disable CPU boost on Linux:
 
 ```sh
 echo "0" | sudo tee /sys/devices/system/cpu/cpufreq/boost
+```
+
+## Profiling
+
+Be sure `strip = false` in `build.zig`.
+
+```
+zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux -Dcpu=x86_64_v3 benchmark
+valgrind --tool=callgrind --dump-instr=yes --collect-jumps=yes ./zig-out/bin/mxfp4
 ```

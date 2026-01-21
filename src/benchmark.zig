@@ -88,6 +88,7 @@ const DequantizeSSSE3Bench = struct {
         var dir = try std.fs.cwd().openDir("cases", .{});
         defer dir.close();
         const scales_bytes = try loadPrefix(alloc, dir, "mixed_wide.scales.bin", 1);
+        defer alloc.free(scales_bytes);
         const blocks_bytes = try loadPrefix(alloc, dir, "mixed_wide.blocks.bin", 16);
         return DequantizeSSSE3Bench{ .scale = scales_bytes[0], .block = blocks_bytes };
     }
@@ -114,6 +115,7 @@ const DequantizeBench = struct {
         var dir = try std.fs.cwd().openDir("cases", .{});
         defer dir.close();
         const scales_bytes = try loadPrefix(alloc, dir, "mixed_wide.scales.bin", 1);
+        defer alloc.free(scales_bytes);
         const blocks_bytes = try loadPrefix(alloc, dir, "mixed_wide.blocks.bin", 16);
         return DequantizeBench{ .scale = scales_bytes[0], .block = blocks_bytes };
     }
