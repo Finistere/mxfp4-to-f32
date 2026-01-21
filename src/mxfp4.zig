@@ -16,8 +16,9 @@ fn e8m0_to_fp32_half(x: u8) f32 {
 
 const KVALUES = [_]i8{ 0, 1, 2, 3, 4, 6, 8, 12, 0, -1, -2, -3, -4, -6, -8, -12 };
 
-pub fn dequantize_block(scale: u8, block: *const [BLOCK_BYTES_SIZE]u8, output: *[VALUES_PER_BLOCK]f32) void {
+pub fn dequantize_block(scale: u8, block: []const u8, output: []f32) void {
     const scale_half = e8m0_to_fp32_half(scale);
+    std.debug.assert(block.len >= BLOCK_BYTES_SIZE);
 
     var i: usize = 0;
     while (i < 16) : (i += 1) {
