@@ -28,7 +28,7 @@ pub fn build(b: *std.Build) void {
     // to our consumers. We must give it a name because a Zig package can expose
     // multiple modules and consumers will need to be able to specify which
     // module they want to access.
-    const mod = b.addModule("mxfp4_to_f32", .{
+    const mod = b.addModule("mxfp4", .{
         // The root source file is the "entry point" of this module. Users of
         // this module will only be able to access public declarations contained
         // in this file, which means that if you have declarations that you
@@ -61,7 +61,7 @@ pub fn build(b: *std.Build) void {
     // If neither case applies to you, feel free to delete the declaration you
     // don't need and to put everything under a single module.
     const exe = b.addExecutable(.{
-        .name = "mxfp4_to_f32",
+        .name = "mxfp4",
         .root_module = b.createModule(.{
             // b.createModule defines a new module just like b.addModule but,
             // unlike b.addModule, it does not expose the module to consumers of
@@ -73,19 +73,25 @@ pub fn build(b: *std.Build) void {
             // definition if desireable (e.g. firmware for embedded devices).
             .target = target,
             .optimize = optimize,
+            .strip = false, // keep debug symbols for profiling
             // List of modules available for import in source files part of the
             // root module.
             .imports = &.{
-                // Here "mxfp4_to_f32" is the name you will use in your source code to
-                // import this module (e.g. `@import("mxfp4_to_f32")`). The name is
+                // Here "mxfp4" is the name you will use in your source code to
+                // import this module (e.g. `@import("mxfp4")`). The name is
                 // repeated because you are allowed to rename your imports, which
                 // can be extremely useful in case of collisions (which can happen
                 // importing modules from different packages).
-                .{ .name = "mxfp4_to_f32", .module = mod },
+                .{ .name = "mxfp4", .module = mod },
             },
         }),
     });
     exe.root_module.addImport("zbench", zbench_module);
+
+    const emitted_asm = exe.getEmittedAsm();
+    const install_asm = b.addInstallFile(emitted_asm, "benchmark.s");
+    const asm_step = b.step("asm", "Emit assembly for benchmark");
+    asm_step.dependOn(&install_asm.step);
 
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default
@@ -146,7 +152,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "mxfp4_to_f32", .module = mod },
+                .{ .name = "mxfp4", .module = mod },
             },
         }),
     });

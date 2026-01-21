@@ -1,5 +1,5 @@
 const std = @import("std");
-const mxfp4_to_f32 = @import("mxfp4_to_f32");
+const mxfp4 = @import("mxfp4");
 const generated_test_cases = @import("generated_test_cases.zig");
 
 test "Test case floats are consistent with expected values." {
@@ -37,7 +37,7 @@ test "Can read MXFP4 from test cases" {
         std.debug.print("Running test case: {s}\n", .{test_case.name});
         var scale_reader = std.io.Reader.fixed(test_case.scales_bytes);
         var block_reader = std.io.Reader.fixed(test_case.blocks_bytes);
-        var reader = mxfp4_to_f32.Mxfp4Reader.init(&block_reader, &scale_reader, buffer, .little);
+        var reader = mxfp4.io.Reader.init(&block_reader, &scale_reader, buffer, .little);
         const out = try gpa.alignedAlloc(u8, .@"4", test_case.f32.len * 4);
         defer gpa.free(out);
         try reader.interface.readSliceAll(out);
@@ -60,13 +60,13 @@ test "Can read GPT-OSS weights" {
     var expected_bin = try BinReader.init(gpa, dir, "f32");
     defer expected_bin.deinit(gpa);
 
-    const buffer = try gpa.alloc(u8, 128);
+    const buffer = try gpa.alloc(u8, 1024);
     defer gpa.free(buffer);
-    var reader = mxfp4_to_f32.Mxfp4Reader.init(&blocks_bin.reader.interface, &scales_bin.reader.interface, buffer, .little);
+    var reader = mxfp4.io.Reader.init(&blocks_bin.reader.interface, &scales_bin.reader.interface, buffer, .little);
 
-    const result = try gpa.alignedAlloc(u8, .@"4", 128);
+    const result = try gpa.alignedAlloc(u8, .@"4", 1024);
     defer gpa.free(result);
-    const expected = try gpa.alignedAlloc(u8, .@"4", 128);
+    const expected = try gpa.alignedAlloc(u8, .@"4", 1024);
     defer gpa.free(expected);
 
     var pos: usize = 0;
@@ -107,7 +107,7 @@ const BinReader = struct {
     pub fn init(alloc: std.mem.Allocator, dir: std.fs.Dir, name: []const u8) !BinReader {
         const filename = try std.mem.concat(alloc, u8, &.{ TENSOR_NAME, ".", name, ".bin" });
         var file = try dir.openFile(filename, .{});
-        const buffer = try alloc.alloc(u8, 128);
+        const buffer = try alloc.alloc(u8, 4096);
         const reader = file.reader(buffer);
         return BinReader{ .file = file, .filename = filename, .buffer = buffer, .reader = reader };
     }
@@ -122,7 +122,8 @@ const BinReader = struct {
 fn readAt(dir: std.fs.Dir, name: []const u8, pos: usize) !u8 {
     const f = try dir.openFile(name, .{});
     defer f.close();
-    var reader = f.reader(&.{});
+    var buffer: [128]u8 = undefined;
+    var reader = f.reader(&buffer);
     try reader.seekTo(@as(u64, pos));
     return reader.interface.takeByte();
 }

@@ -25,7 +25,7 @@ Extract a MXFP4-encoded tensor (blocks/scales) and a dequantized f32 dump from g
 
 The script assumes:
 - The https://huggingface.co/openai/gpt-oss-20b model to be in the gpt-oss-20b/ directory
-- the data will be written to data/ directoyr, overwriting any existing files.
+- the data will be written to data/ directory, overwriting any existing files.
 """
 
 import os
