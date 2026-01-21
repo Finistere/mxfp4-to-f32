@@ -104,6 +104,10 @@ pub const GptOssReader = struct {
         const self: *GptOssReader = @fieldParentPtr("interface", r);
 
         const blocks_limit = @intFromEnum(limit) / (mxfp4.VALUES_PER_BLOCK * @sizeOf(f32));
+
+        // Here we assume that readers use a big enough buffer to at least retrieve one block of f32.
+        if (blocks_limit == 0) return error.ReadFailed;
+
         var n = try bufferedBlocks(self.blocks_reader, blocks_limit);
 
         if (self.scales_reader.bufferedLen() < n) {
@@ -162,5 +166,3 @@ fn hasSsse3() bool {
     const native_target = std.zig.system.resolveTargetQuery(query) catch return false;
     return native_target.cpu.has(.x86, .ssse3);
 }
-
-fn detectNativeCpuFeatures() !std.Target.Cpu {}
