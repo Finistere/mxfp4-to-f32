@@ -7,3 +7,11 @@ The whole environment is configured with devenv (Nix).
 ## Test cases generation
 
 I'm relying on the Python implementation of the quantizer from llama.cpp in [gguf-py](https://github.com/ggml-org/llama.cpp/tree/master/gguf-py) which are tested against the C version (apparently from the repo, haven't double checked). The MXFP4 quantizer is only available from the sources GitHub. Their latest `0.17.1` isn't recent enough.
+
+## Benchmark
+
+```sh
+zig build -Doptimize=ReleaseFast benchmark
+```
+
+For some reason `zig build benchmark` runs the bench so fast that it very likely somehow completely bypasses the bench itself. I don't really understand why.

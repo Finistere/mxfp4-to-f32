@@ -16,7 +16,7 @@ const SimpleReaderBench = struct {
         var reader_buffer: [1024]u8 = undefined;
         var read_buffer: [1024]u8 = undefined;
 
-        var reader = mxfp4_to_f32.SimpleMxfp4Reader.init(
+        var reader = mxfp4_to_f32.Mxfp4Reader.init(
             &block_reader,
             &scale_reader,
             &reader_buffer,
