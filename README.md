@@ -32,7 +32,7 @@ try reader.interface.readSliceAll(&out);
 ## Requirements
 
 - Native endianness only (pass the host endianness to `GptOssReader.init`).
-- SSSE3 is used when available on x86/x86_64; scalar fallback otherwise.
+- SSSE3 is used when available on x86/x86_64 (runtime detection); scalar fallback otherwise.
 
 ## Setup
 
