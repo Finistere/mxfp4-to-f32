@@ -100,7 +100,7 @@ test "Can read GPT-OSS weights" {
     }
 }
 
-test "Reader.fixed with short blocks fails" {
+test "short blocks fails" {
     var scales = [_]u8{ 0, 0 };
     var blocks = [_]u8{0} ** mxfp4.BLOCK_BYTES_SIZE;
     var scale_reader = std.io.Reader.fixed(&scales);
@@ -109,10 +109,10 @@ test "Reader.fixed with short blocks fails" {
     var reader = mxfp4.io.GptOssReader.init(&block_reader, &scale_reader, buffer[0..], .little);
     var out: [mxfp4.BYTES_PER_F32_BLOCK * 2]u8 = undefined;
 
-    try std.testing.expectError(error.EndOfStream, reader.interface.readSliceAll(out[0..]));
+    try std.testing.expectError(error.ReadFailed, reader.interface.readSliceAll(out[0..]));
 }
 
-test "Reader.fixed with short scales fails" {
+test "short scales fails" {
     var scales = [_]u8{0};
     var blocks = [_]u8{0} ** (mxfp4.BLOCK_BYTES_SIZE * 2);
     var scale_reader = std.io.Reader.fixed(&scales);
@@ -121,7 +121,19 @@ test "Reader.fixed with short scales fails" {
     var reader = mxfp4.io.GptOssReader.init(&block_reader, &scale_reader, buffer[0..], .little);
     var out: [mxfp4.BYTES_PER_F32_BLOCK * 2]u8 = undefined;
 
-    try std.testing.expectError(error.EndOfStream, reader.interface.readSliceAll(out[0..]));
+    try std.testing.expectError(error.ReadFailed, reader.interface.readSliceAll(out[0..]));
+}
+
+test "partial block fails" {
+    var scales = [_]u8{ 0, 0 };
+    var blocks = [_]u8{0} ** (mxfp4.BLOCK_BYTES_SIZE + 1);
+    var scale_reader = std.io.Reader.fixed(&scales);
+    var block_reader = std.io.Reader.fixed(&blocks);
+    var buffer: [mxfp4.BYTES_PER_F32_BLOCK]u8 = undefined;
+    var reader = mxfp4.io.GptOssReader.init(&block_reader, &scale_reader, buffer[0..], .little);
+    var out: [mxfp4.BYTES_PER_F32_BLOCK * 2]u8 = undefined;
+
+    try std.testing.expectError(error.ReadFailed, reader.interface.readSliceAll(out[0..]));
 }
 
 const TENSOR_NAME = "block.0.mlp.mlp1_weight";
