@@ -1,6 +1,6 @@
 # mxfp4-to-f32
 
-Zig `std.io.Reader` for MXFP4 quantized F32 [gpt-oss](https://github.com/openai/gpt-oss) tensors.
+Zig 0.15 `std.io.Reader` for MXFP4 quantized F32 [gpt-oss](https://github.com/openai/gpt-oss) tensors.
 
 The specification for MXFP4 can be found here: https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf.
 It does _not_ specify how data is stored, so this implementation is specific to GPT-OSS tensor layout.
