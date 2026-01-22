@@ -46,7 +46,13 @@ test "Can read MXFP4 from test cases" {
 
 test "Can read GPT-OSS weights" {
     const gpa = std.testing.allocator;
-    var dir = try std.fs.cwd().openDir("data", .{});
+    var dir = std.fs.cwd().openDir("data", .{}) catch {
+        std.debug.panic(
+            "Missing ./data directory. Download gpt-oss-20b weights and extract_gptoss_tensors.py before this test.",
+            .{},
+        );
+        return;
+    };
     defer dir.close();
 
     var scales_bin = try BinReader.init(gpa, dir, "scales");

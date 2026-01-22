@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const mxfp4 = @import("root.zig");
 
 const E2M1_LUT = [_]f32{
@@ -66,10 +67,28 @@ const HIGH_SHIFT: @Vector(16, u3) = @splat(4);
 /// https://www.felixcloutier.com/x86/pshufb (SSE3)
 /// Performs a byte-wise shuffle of the first operand (table) according to the indices specified in the second operand (mask).
 fn pshufb(table: @Vector(16, i8), mask: @Vector(16, u8)) @Vector(16, i8) {
-    var dst = table;
-    asm volatile ("pshufb %[mask], %[dst]"
-        : [dst] "+x" (dst), // input/output
-        : [mask] "x" (mask),
-        : .{});
-    return dst;
+    switch (builtin.target.cpu.arch) {
+        .x86, .x86_64 => {
+            var dst = table;
+            asm volatile ("pshufb %[mask], %[dst]"
+                : [dst] "+x" (dst), // input/output
+                : [mask] "x" (mask),
+                : .{});
+            return dst;
+        },
+        else => {
+            // FIXME: Fallback implementation that shouldn't be used, I'm just not really sure how to properly handle 
+            // runtime detection to be honest.
+            var dst: @Vector(16, i8) = undefined;
+            for (0..16) |i| {
+                const index = mask[i];
+                if (index & 0x80 != 0) {
+                    dst[i] = 0;
+                } else {
+                    dst[i] = table[@as(usize, index)];
+                }
+            }
+            return dst;
+        },
+    }
 }
