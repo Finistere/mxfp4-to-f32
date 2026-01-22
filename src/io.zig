@@ -34,8 +34,15 @@ pub const GptOssReader = struct {
     fn stream_scalar(r: *std.io.Reader, w: *std.io.Writer, limit: std.io.Limit) std.io.Reader.StreamError!usize {
         const self: *GptOssReader = @fieldParentPtr("interface", r);
 
-        const scale: u8 = try self.scales_reader.takeByte();
-        try self.blocks_reader.fill(mxfp4.BLOCK_BYTES_SIZE);
+        const scale: u8 = self.scales_reader.takeByte() catch |err| return switch(err) {
+            // If we still have bytes left in the blocks, there is a discrepancy between the blocks and the scales.
+            error.EndOfStream => if (self.blocks_reader.peekByte()) |_| error.ReadFailed else |_| err,
+            else => err,
+        };
+        self.blocks_reader.fill(mxfp4.BLOCK_BYTES_SIZE) catch {
+            // We don't have enough data left for a full block.
+            return error.ReadFailed;
+        };
         // Here we use the blocks reader buffer directly avoiding a costly copy. I would love to do the same for the f32 block,
         // writing directly into the writer. But we have no guarantee on the alignment and it's not reasonable to put
         // expectations on it for a generic Reader.
