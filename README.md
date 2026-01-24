@@ -4,9 +4,7 @@ Zig 0.15 `std.io.Reader` for MXFP4 quantized F32 [gpt-oss](https://github.com/op
 
 The specification for MXFP4 can be found here: https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf. It does _not_ specify how data is stored, so this implementation is specific to GPT-OSS tensor layout.
 
-The benchmark shows a throughput of ~3.4 GB/s but it's very dependent on buffer sizes. In my `std.io.Reader` implementation I'm relying on the nested Reader buffer and output buffer to be big enough that I can decode multiple blocks at once for best performance in the SSSE3 variant. It's a debatable choice, depends who is the consumer (internal lib for one project vs public lib) and how it's meant to be used.
-
-Today the implementation spends a lot of time in `@memcpy`, so that might be improvable, a bit unclear with `std.dio.Reader`.
+The implementation achieves an input throughput of 5.7 GB/s on recent x86 processors with AVX-512BW on 280MB of data and 2.2 GB/s without SIMD. More details in the benchmark section. SIMD detection is done at runtime.
 
 ## Usage
 
@@ -27,11 +25,6 @@ var reader = mxfp4.io.GptOssReader.init(
 var out: [16 * 1024]u8 = undefined;
 try reader.interface.readSliceAll(&out);
 ```
-
-## Requirements
-
-- Native endianness only (pass the host endianness to `GptOssReader.init`).
-- SSSE3 is used when available on x86/x86_64 (runtime detection); scalar fallback otherwise.
 
 ## Setup
 
@@ -67,18 +60,23 @@ zig build test
 
 ## Benchmarks
 
-The first bench loads 1MB of blocks and 64KB of scales into memory, which fits into L3. The second reads 265MB of values and 17MB of scales from disk which ends up generating 2.1GB of floats. In practice it likely reads from RAM though. Both use 16KB buffers. `Scalar` and `SSSE3` both correspond to 1 million blocks dequantization.
+The first bench loads 1MB of blocks and 64KB of scales into memory, which fits into L3. The second reads 265MB of values and 17MB of scales from disk which ends up generating 2.1GB of floats. In practice it will surely read from RAM though as the machine had plenty. Both use 16KB buffers.
 
-In terms of throughput, for the cpu boost version:
+- x86_64 -> scalar
+- x86_64_v2 -> SSSE3: 1 block at a time.
+- x86_64_v3 -> AVX2: 2 blocks at a time.
+- x86_64_v4 -> AVX-512BW: 4 blocks at a time.
 
-- From disk/ram: 3.39 GB/s
-- From L3: 3.92 GB/s
-- Scalar dequantization: 2.71 GB/s
-- SSSE3 dequantization: 58.2 GB/s
+Here are the results in terms of input throughput:
 
-Take those numbers with a big grain of salt though. I'm not super confident in the benchmarks, as in I'm not entirely sure what Zig optimized away despite my best effort with `std.mem.doNotOptimizeAway`. The latter can have a significant impact on performance when placed inside the hot loop, so it's not that easy to interpret those numbers.
-
-However the SSSE3 variant was definitely faster, dequantization many blocks at once helped a lot, limiting the `@memcpy` between buffers also. Given the small difference between the L3 and disk/ram benches, it very likely means that it's the Reader implementation that's slowing all of this down.
+| arch                        | 2M (input GB/s) | 530M (input GB/s) |
+| --------------------------- | --------------: | ----------------: |
+| native with cpu boost       |             8.1 |               5.7 |
+| native without cpu boost    |             6.4 |               4.4 |
+| x86_64_v4 without cpu boost |             6.5 |               4.4 |
+| x86_64_v3 without cpu boost |             5.1 |               4.2 |
+| x86_64_v2 without cpu boost |             4.1 |               3.2 |
+| x86_64 without cpu boost    |             1.9 |               1.7 |
 
 ```sh
 zig build -Doptimize=ReleaseFast benchmark
@@ -96,7 +94,7 @@ benchmark              runs     total time     time/run (avg ± σ)    (min ... 
 Scalar                 675      3.99s          5.911ms ± 24.294us    (5.894ms ... 6.17ms)         5.913ms    5.987ms    6.168ms
 SIMD1                  2680     3.998s         1.491ms ± 12.969us    (1.487ms ... 1.757ms)        1.492ms    1.503ms    1.513ms
 SIMD2                  2410     3.998s         1.659ms ± 20.299us    (1.649ms ... 2.141ms)        1.66ms     1.729ms    1.742ms
-SIMD3                  1970     3.998s         2.029ms ± 18.347us    (2.018ms ... 2.294ms)        2.031ms    2.09ms     2.11ms
+SIMD4                  1970     3.998s         2.029ms ± 18.347us    (2.018ms ... 2.294ms)        2.031ms    2.09ms     2.11ms
 
 
 ** WITHOUT CPU BOOST | NATIVE **
@@ -107,7 +105,7 @@ benchmark              runs     total time     time/run (avg ± σ)    (min ... 
 Scalar                 517      3.994s         7.725ms ± 29.71us     (7.705ms ... 7.979ms)        7.73ms     7.954ms    7.978ms
 SIMD1                  2025     4s             1.975ms ± 12.941us    (1.962ms ... 2.233ms)        1.978ms    2.001ms    2.01ms
 SIMD2                  1841     4.001s         2.173ms ± 17.134us    (2.165ms ... 2.438ms)        2.173ms    2.2ms      2.25ms
-SIMD3                  1506     3.999s         2.655ms ± 17.848us    (2.646ms ... 2.92ms)         2.655ms    2.677ms    2.745ms
+SIMD4                  1506     3.999s         2.655ms ± 17.848us    (2.646ms ... 2.92ms)         2.655ms    2.677ms    2.745ms
 
 
 ** WITHOUT CPU BOOST | x86_64_v4 **
@@ -130,6 +128,16 @@ benchmark              runs     total time     time/run (avg ± σ)    (min ... 
 530M floats            44       3.914s         88.956ms ± 1.137ms    (87.913ms ... 92.137ms)      90.071ms   92.137ms   92.137ms
 
 ** WITHOUT CPU BOOST | x86_64 **
+benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
+-----------------------------------------------------------------------------------------------------------------------------
+2M floats (L3 cache)   7275     3.998s         549.563us ± 10.037us  (539.749us ... 831.231us)    552.894us  568.013us  571.499us
+530M floats            23       3.869s         168.225ms ± 249.475us (167.836ms ... 168.577ms)    168.456ms  168.577ms  168.577ms
+
+** WITH CPU BOOST | x86_64 **
+benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
+-----------------------------------------------------------------------------------------------------------------------------
+2M floats (L3 cache)   9482     3.956s         417.293us ± 9.596us   (400.587us ... 685.717us)    420.175us  432.959us  435.814us
+530M floats            31       3.955s         127.604ms ± 793.986us (127.204ms ... 130.684ms)    127.407ms  130.684ms  130.684ms
 
 ```
 
