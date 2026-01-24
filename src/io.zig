@@ -62,7 +62,7 @@ pub const GptOssReader = struct {
         const bytes: []const u8 = std.mem.sliceAsBytes(&self.f32_block);
 
         const l: usize = @intFromEnum(limit);
-        switch (std.math.order(l, bytes.len)) {
+        switch (std.math.order(l, mxfp4.BYTES_PER_F32_BLOCK)) {
             .lt => {
                 try w.writeAll(bytes[0..l]);
                 const remaining = bytes.len - l;
@@ -100,18 +100,26 @@ pub const GptOssReader = struct {
         // Here we assume that readers use a big enough buffer to at least retrieve one block of f32.
         if (blocks_limit == 0) return error.ReadFailed;
 
-        // How many full blocks can we read from the blocks reader?
-        var block_count = bufferedBlockCount(self.blocks_reader, blocks_limit) catch |err| switch (err) {
+        // Try to fill as many blocks as possible up to the limit.
+        var block_count = blocks_limit;
+        self.blocks_reader.fill(blocks_limit * mxfp4.BLOCK_BYTES_SIZE) catch |err| switch (err) {
             error.EndOfStream => {
-                // If we still have bytes left in the scales, there is a discrepancy between the blocks and the scales.
-                return if (self.scales_reader.peekByte()) |_| error.ReadFailed else |_| err;
+                switch (self.blocks_reader.bufferedLen()) {
+                    // We have truly nothing left, return the EndOfStream.
+                    0 => return if (self.scales_reader.peekByte()) |_| error.ReadFailed else |_| err,
+                    // We have not enough data left for a full block.
+                    1...mxfp4.BLOCK_BYTES_SIZE - 1 => return error.ReadFailed,
+                    else => {
+                        block_count = self.blocks_reader.bufferedLen() / mxfp4.BLOCK_BYTES_SIZE;
+                    },
+                }
             },
             else => return err,
         };
 
         // Ensure we have enough scales for the blocks we can read.
         if (self.scales_reader.bufferedLen() < block_count) {
-            self.scales_reader.fillMore() catch |err| switch (err) {
+            self.scales_reader.fill(block_count) catch |err| switch (err) {
                 error.EndOfStream => {
                     // we don't have enough scales for the blocks we loaded,
                     // there is discrepancy between the blocks and the scales.
@@ -119,9 +127,7 @@ pub const GptOssReader = struct {
                 },
                 else => return err,
             };
-            block_count = @min(block_count, self.scales_reader.bufferedLen());
         }
-        if (block_count == 0) return 0;
 
         const scales_buffer = self.scales_reader.buffered();
         const blocks_buffer = self.blocks_reader.buffered();
@@ -155,27 +161,5 @@ pub const GptOssReader = struct {
         try self.scales_reader.discardAll(block_count);
         try self.blocks_reader.discardAll(block_count * mxfp4.BLOCK_BYTES_SIZE);
         return block_count * mxfp4.BYTES_PER_F32_BLOCK;
-    }
-
-    /// Returns the number of full blocks currently buffered, up to blocks_limit.
-    fn bufferedBlockCount(reader: *std.io.Reader, blocks_limit: usize) std.io.Reader.StreamError!usize {
-        var n = reader.bufferedLen() / mxfp4.BLOCK_BYTES_SIZE;
-        if (n >= blocks_limit) return blocks_limit;
-
-        reader.fillMore() catch |err| switch (err) {
-            error.EndOfStream => {
-                return switch (reader.bufferedLen()) {
-                    // We have truly nothing left, return the EndOfStream.
-                    0 => err,
-                    // We have not enough data left for a full block.
-                    1...mxfp4.BLOCK_BYTES_SIZE - 1 => error.ReadFailed,
-                    else => n,
-                };
-            },
-            else => return err,
-        };
-
-        n = reader.bufferedLen() / mxfp4.BLOCK_BYTES_SIZE;
-        return @min(n, blocks_limit);
     }
 };
