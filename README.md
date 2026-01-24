@@ -6,6 +6,8 @@ The specification for MXFP4 can be found here: https://www.opencompute.org/docum
 
 The implementation achieves an input throughput of 6.5 GB/s on recent x86 processors with AVX-512BW on 280MB of data and 2.7 GB/s without SIMD. More details in the benchmark section. SIMD detection is done at runtime.
 
+For AVX support I had to use the LLVM backend of Zig.
+
 ## Usage
 
 ```zig
@@ -148,7 +150,8 @@ echo "0" | sudo tee /sys/devices/system/cpu/cpufreq/boost
 
 Be sure to have `strip = false` in `build.zig`.
 
-```
+```sh
+# My Valgrind doesn't support more recent instructions.
 zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux -Dcpu=x86_64_v3 benchmark
 valgrind --tool=callgrind --dump-instr=yes --collect-jumps=yes ./zig-out/bin/mxfp4
 ```
