@@ -62,6 +62,7 @@ pub fn build(b: *std.Build) void {
     // don't need and to put everything under a single module.
     const exe = b.addExecutable(.{
         .name = "mxfp4",
+        .use_llvm = true,
         .root_module = b.createModule(.{
             // b.createModule defines a new module just like b.addModule but,
             // unlike b.addModule, it does not expose the module to consumers of
@@ -147,6 +148,7 @@ pub fn build(b: *std.Build) void {
 
     // Runs integration tests defined in tests/integration.zig.
     const integration_tests = b.addTest(.{
+        .use_llvm = true,
         .root_module = b.createModule(.{
             .root_source_file = b.path("tests/integration.zig"),
             .target = target,

@@ -3,7 +3,9 @@ const builtin = @import("builtin");
 const mxfp4 = @import("root.zig");
 
 const SCALAR_VTABLE = std.io.Reader.VTable{ .stream = GptOssReader.stream_scalar };
-const SSSE3_VTABLE = std.io.Reader.VTable{ .stream = GptOssReader.stream_ssse3_blocks };
+const SIMD1_VTABLE = std.io.Reader.VTable{ .stream = GptOssReader.stream_simd1 };
+const SIMD2_VTABLE = std.io.Reader.VTable{ .stream = GptOssReader.stream_simd2 };
+const SIMD4_VTABLE = std.io.Reader.VTable{ .stream = GptOssReader.stream_simd4 };
 
 /// https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
 /// An io.Reader adapter that reads MXFP4 compressed data from two underlying readers for the scales and blocks.
@@ -23,7 +25,12 @@ pub const GptOssReader = struct {
         if (endianness != builtin.target.cpu.arch.endian()) @panic("Only native endianness is supported by this adapter.");
 
         const interface = std.io.Reader{
-            .vtable = if (hasSsse3()) &SSSE3_VTABLE else &SCALAR_VTABLE,
+            .vtable = switch (mxfp4.dequantize.simdBlockWidth()) {
+                4 => &SIMD4_VTABLE,
+                2 => &SIMD2_VTABLE,
+                1 => &SIMD1_VTABLE,
+                else => &SCALAR_VTABLE,
+            },
             .buffer = buffer,
             .seek = 0,
             .end = 0,
@@ -34,18 +41,18 @@ pub const GptOssReader = struct {
     fn stream_scalar(r: *std.io.Reader, w: *std.io.Writer, limit: std.io.Limit) std.io.Reader.StreamError!usize {
         const self: *GptOssReader = @fieldParentPtr("interface", r);
 
-        const scale: u8 = self.scales_reader.takeByte() catch |err| return switch(err) {
+        const scale: u8 = self.scales_reader.takeByte() catch |err| return switch (err) {
             // If we still have bytes left in the blocks, there is a discrepancy between the blocks and the scales.
             error.EndOfStream => if (self.blocks_reader.peekByte()) |_| error.ReadFailed else |_| err,
             else => err,
         };
+
         self.blocks_reader.fill(mxfp4.BLOCK_BYTES_SIZE) catch {
             // We don't have enough data left for a full block.
             return error.ReadFailed;
         };
-        // Here we use the blocks reader buffer directly avoiding a costly copy. I would love to do the same for the f32 block,
-        // writing directly into the writer. But we have no guarantee on the alignment and it's not reasonable to put
-        // expectations on it for a generic Reader.
+
+        // Here we use the blocks reader buffer directly avoiding a costly copy.
         mxfp4.dequantize.gpt_oss_one_block(scale, self.blocks_reader.buffered()[0..mxfp4.BLOCK_BYTES_SIZE].*, &self.f32_block);
 
         try self.blocks_reader.discardAll(mxfp4.BLOCK_BYTES_SIZE);
@@ -71,44 +78,21 @@ pub const GptOssReader = struct {
         }
     }
 
-    /// This function is kept as a reference for this exercise.
-    fn stream_ssse3(r: *std.io.Reader, w: *std.io.Writer, limit: std.io.Limit) std.io.Reader.StreamError!usize {
-        const self: *GptOssReader = @fieldParentPtr("interface", r);
+    fn stream_simd1(r: *std.io.Reader, w: *std.io.Writer, limit: std.io.Limit) std.io.Reader.StreamError!usize {
+        return GptOssReader.stream_simd(1, r, w, limit);
+    }
 
-        const scale: u8 = try self.scales_reader.takeByte();
-        try self.blocks_reader.fill(mxfp4.BLOCK_BYTES_SIZE);
-        // Here we use the blocks reader buffer directly avoiding a costly copy.
-        const f32_vector: @Vector(mxfp4.VALUES_PER_BLOCK, f32) = mxfp4.dequantize.gpt_oss_one_block_ssse3(
-            scale,
-            self.blocks_reader.buffered()[0..mxfp4.BLOCK_BYTES_SIZE].*,
-        );
+    fn stream_simd2(r: *std.io.Reader, w: *std.io.Writer, limit: std.io.Limit) std.io.Reader.StreamError!usize {
+        return GptOssReader.stream_simd(2, r, w, limit);
+    }
 
-        try self.blocks_reader.discardAll(mxfp4.BLOCK_BYTES_SIZE);
-
-        // Here we do assume that we want the current arch endianness which we checked in the init() function.
-        // Otherwise we would need to use the writeInt function when it differs which likely has some extra cost.
-        const arr: *const [mxfp4.BYTES_PER_F32_BLOCK]u8 = @ptrCast(&f32_vector);
-        const bytes: []const u8 = arr[0..];
-
-        const l: usize = @intFromEnum(limit);
-        switch (std.math.order(l, bytes.len)) {
-            .lt => {
-                try w.writeAll(bytes[0..l]);
-                const remaining = bytes.len - l;
-                if (remaining > r.buffer.len - r.end) return error.ReadFailed;
-                @memcpy(r.buffer[r.seek .. r.seek + remaining], bytes[l..]);
-                r.end += remaining;
-                return l;
-            },
-            else => {
-                try w.writeAll(bytes);
-                return bytes.len;
-            },
-        }
+    fn stream_simd4(r: *std.io.Reader, w: *std.io.Writer, limit: std.io.Limit) std.io.Reader.StreamError!usize {
+        return GptOssReader.stream_simd(4, r, w, limit);
     }
 
     /// To improve reader speed this function decodes as many blocks as requested at once
-    fn stream_ssse3_blocks(r: *std.io.Reader, w: *std.io.Writer, limit: std.io.Limit) std.io.Reader.StreamError!usize {
+    /// using SIMD for N blocks at a time.
+    fn stream_simd(comptime N: u8, r: *std.io.Reader, w: *std.io.Writer, limit: std.io.Limit) std.io.Reader.StreamError!usize {
         const self: *GptOssReader = @fieldParentPtr("interface", r);
 
         const blocks_limit = @intFromEnum(limit) / mxfp4.BYTES_PER_F32_BLOCK;
@@ -116,6 +100,7 @@ pub const GptOssReader = struct {
         // Here we assume that readers use a big enough buffer to at least retrieve one block of f32.
         if (blocks_limit == 0) return error.ReadFailed;
 
+        // How many full blocks can we read from the blocks reader?
         var block_count = bufferedBlockCount(self.blocks_reader, blocks_limit) catch |err| switch (err) {
             error.EndOfStream => {
                 // If we still have bytes left in the scales, there is a discrepancy between the blocks and the scales.
@@ -124,10 +109,12 @@ pub const GptOssReader = struct {
             else => return err,
         };
 
+        // Ensure we have enough scales for the blocks we can read.
         if (self.scales_reader.bufferedLen() < block_count) {
             self.scales_reader.fillMore() catch |err| switch (err) {
                 error.EndOfStream => {
-                    // we don't have enough scales for the blocks we loaded, there is discrepancy between the blocks and the scales.
+                    // we don't have enough scales for the blocks we loaded,
+                    // there is discrepancy between the blocks and the scales.
                     return error.ReadFailed;
                 },
                 else => return err,
@@ -138,23 +125,31 @@ pub const GptOssReader = struct {
 
         const scales_buffer = self.scales_reader.buffered();
         const blocks_buffer = self.blocks_reader.buffered();
-        for (0..block_count) |i| {
-            const scale: u8 = scales_buffer[i];
+
+        // First process as many blocks as possible in SIMD with the highest possible width.
+        const simd_blocks = block_count / N;
+        for (0..simd_blocks) |i| {
+            const scales_ptr: *[N]u8 = @ptrCast(scales_buffer[i * N .. (i + 1) * N].ptr);
+            const scales: [N]u8 = scales_ptr.*;
+            const block = blocks_buffer[(i * mxfp4.BLOCK_BYTES_SIZE * N) .. (i + 1) * mxfp4.BLOCK_BYTES_SIZE * N];
+            const block_ptr = @as(*const [N * 16]u8, @ptrCast(block.ptr));
+
+            // Here we use the blocks reader buffer directly avoiding a costly copy.
+            const slice = try w.writableSlice(mxfp4.BYTES_PER_F32_BLOCK * N);
+            const output: *[mxfp4.BYTES_PER_F32_BLOCK * N]u8 = @ptrCast(slice.ptr);
+            mxfp4.dequantize.gpt_oss_blocks_simd(N, scales, @bitCast(block_ptr.*), output);
+        }
+
+        // Process remaining blocks one by one.
+        for ((simd_blocks * N)..block_count) |i| {
+            const scales: [1]u8 = .{scales_buffer[i]};
             const block = blocks_buffer[(i * mxfp4.BLOCK_BYTES_SIZE) .. (i + 1) * mxfp4.BLOCK_BYTES_SIZE];
             const block_ptr = @as(*const [16]u8, @ptrCast(block.ptr));
 
             // Here we use the blocks reader buffer directly avoiding a costly copy.
-            const f32_vector: @Vector(mxfp4.VALUES_PER_BLOCK, f32) = mxfp4.dequantize.gpt_oss_one_block_ssse3(
-                scale,
-                @bitCast(block_ptr.*),
-            );
-
-            // Here we do assume that we want the current arch endianness which we checked in the init() function.
-            // Otherwise we would need to use the writeInt function when it differs which likely has some extra cost.
-            const arr: *const [mxfp4.BYTES_PER_F32_BLOCK]u8 = @ptrCast(&f32_vector);
-            const bytes: []const u8 = arr[0..];
-
-            try w.writeAll(bytes);
+            const slice = try w.writableSlice(mxfp4.BYTES_PER_F32_BLOCK);
+            const output: *[mxfp4.BYTES_PER_F32_BLOCK]u8 = @ptrCast(slice.ptr);
+            mxfp4.dequantize.gpt_oss_blocks_simd(1, scales, @bitCast(block_ptr.*), output);
         }
 
         try self.scales_reader.discardAll(block_count);
@@ -170,6 +165,7 @@ pub const GptOssReader = struct {
         reader.fillMore() catch |err| switch (err) {
             error.EndOfStream => {
                 return switch (reader.bufferedLen()) {
+                    // We have truly nothing left, return the EndOfStream.
                     0 => err,
                     // We have not enough data left for a full block.
                     1...mxfp4.BLOCK_BYTES_SIZE - 1 => error.ReadFailed,
@@ -183,13 +179,3 @@ pub const GptOssReader = struct {
         return @min(n, blocks_limit);
     }
 };
-
-/// Returns true if the CPU supports SSSE3 instructions at runtime.
-/// Very likely to be useless as I would expect all somewhat recent CPUs to have SSSE3
-/// But given the target is ZML, a library, runtime detection gives the most flexibility.
-fn hasSsse3() bool {
-    var query = std.Target.Query.fromTarget(&builtin.target);
-    query.cpu_model = .native; // ask OS/compiler to resolve real CPU
-    const native_target = std.zig.system.resolveTargetQuery(query) catch return false;
-    return native_target.cpu.has(.x86, .ssse3);
-}

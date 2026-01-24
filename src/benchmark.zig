@@ -80,31 +80,33 @@ fn faillible_gpt_oss_tensor_reader_bench(alloc: std.mem.Allocator) !void {
 }
 
 /// Benchmark dequantization of a single block using SSSE3.
-const DequantizeSSSE3Bench = struct {
-    scale: u8,
-    block: []const u8,
+fn DequantizeSIMDBench(comptime N: usize) type {
+    return struct {
+        scales: *const [N]u8,
+        blocks: *const [N * 16]u8,
 
-    pub fn init(alloc: std.mem.Allocator) !DequantizeSSSE3Bench {
-        var dir = try std.fs.cwd().openDir("cases", .{});
-        defer dir.close();
-        const scales_bytes = try loadPrefix(alloc, dir, "mixed_wide.scales.bin", 1);
-        defer alloc.free(scales_bytes);
-        const blocks_bytes = try loadPrefix(alloc, dir, "mixed_wide.blocks.bin", 16);
-        return DequantizeSSSE3Bench{ .scale = scales_bytes[0], .block = blocks_bytes };
-    }
-
-    pub fn run(self: *DequantizeSSSE3Bench, _: std.mem.Allocator) void {
-        var x: @Vector(32, f32) = undefined;
-        for (0..1000_000) |_| {
-            x = mxfp4.dequantize.gpt_oss_one_block_ssse3(self.scale, self.block[0..16].*);
+        pub fn init(alloc: std.mem.Allocator) !@This() {
+            var dir = try std.fs.cwd().openDir("data", .{});
+            defer dir.close();
+            const scales = try loadPrefix(alloc, dir, "block.0.mlp.mlp1_weight.scales.bin", N);
+            const blocks = try loadPrefix(alloc, dir, "block.0.mlp.mlp1_weight.blocks.bin", N * 16);
+            return .{ .scales = scales, .blocks = blocks };
         }
-        std.mem.doNotOptimizeAway(x);
-    }
 
-    pub fn deinit(self: DequantizeSSSE3Bench, alloc: std.mem.Allocator) void {
-        alloc.free(self.block);
-    }
-};
+        pub fn run(self: *@This(), _: std.mem.Allocator) void {
+            var output: [mxfp4.BYTES_PER_F32_BLOCK * N]u8 = undefined;
+            for (0..1000_000) |_| {
+                mxfp4.dequantize.gpt_oss_blocks_simd(N, self.scales.*, self.blocks.*, &output);
+            }
+            std.mem.doNotOptimizeAway(output);
+        }
+
+        pub fn deinit(self: @This(), alloc: std.mem.Allocator) void {
+            alloc.free(self.scales);
+            alloc.free(self.blocks);
+        }
+    };
+}
 
 /// Benchmark dequantization of a single block using scalar code.
 const DequantizeBench = struct {
@@ -145,11 +147,17 @@ pub fn main() !void {
     const l3_cache_reader_benchmark = try L3CacheReaderBench.init(allocator);
     defer l3_cache_reader_benchmark.deinit(allocator);
 
-    const dequantize_benchmark = try DequantizeBench.init(allocator);
-    defer dequantize_benchmark.deinit(allocator);
-
-    const dequantize_ssse3_benchmark = try DequantizeSSSE3Bench.init(allocator);
-    defer dequantize_ssse3_benchmark.deinit(allocator);
+    // const dequantize_benchmark = try DequantizeBench.init(allocator);
+    // defer dequantize_benchmark.deinit(allocator);
+    //
+    // const dequantize_simd1_benchmark = try DequantizeSIMDBench(1).init(allocator);
+    // defer dequantize_simd1_benchmark.deinit(allocator);
+    //
+    // const dequantize_simd2_benchmark = try DequantizeSIMDBench(2).init(allocator);
+    // defer dequantize_simd2_benchmark.deinit(allocator);
+    //
+    // const dequantize_simd4_benchmark = try DequantizeSIMDBench(4).init(allocator);
+    // defer dequantize_simd4_benchmark.deinit(allocator);
 
     var bench = zbench.Benchmark.init(allocator, .{
         .time_budget_ns = 4 * 1_000_000_000,
@@ -157,24 +165,31 @@ pub fn main() !void {
     defer bench.deinit();
     try bench.addParam("2M floats (L3 cache)", &l3_cache_reader_benchmark, .{});
     try bench.add("530M floats", &gpt_oss_tensor_reader_bench, .{});
-    try bench.addParam("Scalar", &dequantize_benchmark, .{});
-    try bench.addParam("SSSE3", &dequantize_ssse3_benchmark, .{});
+    // try bench.addParam("Scalar", &dequantize_benchmark, .{});
+    // try bench.addParam("SIMD1", &dequantize_simd1_benchmark, .{});
+    // try bench.addParam("SIMD2", &dequantize_simd2_benchmark, .{});
+    // try bench.addParam("SIMD3", &dequantize_simd4_benchmark, .{});
     try bench.run(writer);
 
     return writer.flush();
 }
 
-fn loadPrefix(alloc: std.mem.Allocator, dir: std.fs.Dir, filename: []const u8, len: usize) ![]u8 {
+fn loadPrefix(
+    alloc: std.mem.Allocator,
+    dir: std.fs.Dir,
+    filename: []const u8,
+    comptime N: usize,
+) !*const [N]u8 {
     var file = try dir.openFile(filename, .{});
     defer file.close();
 
-    const out = try alloc.alloc(u8, len);
+    const out = try alloc.alloc(u8, N);
     errdefer alloc.free(out);
     const buffer = try alloc.alloc(u8, 1024);
     defer alloc.free(buffer);
     var reader = file.reader(buffer);
     try reader.interface.readSliceAll(out);
-    return out;
+    return @ptrCast(out.ptr);
 }
 
 const BinReader = struct {

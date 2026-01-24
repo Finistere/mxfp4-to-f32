@@ -2,8 +2,7 @@
 
 Zig 0.15 `std.io.Reader` for MXFP4 quantized F32 [gpt-oss](https://github.com/openai/gpt-oss) tensors.
 
-The specification for MXFP4 can be found here: https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf.
-It does _not_ specify how data is stored, so this implementation is specific to GPT-OSS tensor layout.
+The specification for MXFP4 can be found here: https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf. It does _not_ specify how data is stored, so this implementation is specific to GPT-OSS tensor layout.
 
 The benchmark shows a throughput of ~3.4 GB/s but it's very dependent on buffer sizes. In my `std.io.Reader` implementation I'm relying on the nested Reader buffer and output buffer to be big enough that I can decode multiple blocks at once for best performance in the SSSE3 variant. It's a debatable choice, depends who is the consumer (internal lib for one project vs public lib) and how it's meant to be used.
 
@@ -89,22 +88,33 @@ zig build -Doptimize=ReleaseFast benchmark
 AMD Ryzen 9 7950X3D
 Linux 6.18.5
 
-** WITH CPU BOOST **
+** WITH CPU BOOST | NATIVE **
 benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
 -----------------------------------------------------------------------------------------------------------------------------
-2M floats (L3 cache)   15491    3.955s         255.314us ± 3.149us   (250.834us ... 329.583us)    257.216us  265.632us  267.857us
-530M floats            51       3.904s         76.55ms ± 1.229ms     (75.499ms ... 80.102ms)      77.134ms   80.102ms   80.102ms
-Scalar                 672      3.986s         5.932ms ± 3.316us     (5.925ms ... 5.956ms)        5.932ms    5.946ms    5.95ms
-SSSE3                  14377    3.961s         275.536us ± 2.104us   (274.493us ... 362.051us)    277.469us  278.932us  280.445us
+2M floats (L3 cache)   30352    3.989s         131.425us ± 6.67us    (127.972us ... 898.19us)     130.757us  138.963us  146.147us
+530M floats            79       3.933s         49.788ms ± 381.681us  (49.13ms ... 50.826ms)       50.015ms   50.826ms   50.826ms
+Scalar                 675      3.99s          5.911ms ± 24.294us    (5.894ms ... 6.17ms)         5.913ms    5.987ms    6.168ms
+SIMD1                  2680     3.998s         1.491ms ± 12.969us    (1.487ms ... 1.757ms)        1.492ms    1.503ms    1.513ms
+SIMD2                  2410     3.998s         1.659ms ± 20.299us    (1.649ms ... 2.141ms)        1.66ms     1.729ms    1.742ms
+SIMD3                  1970     3.998s         2.029ms ± 18.347us    (2.018ms ... 2.294ms)        2.031ms    2.09ms     2.11ms
 
 
-** WITHOUT CPU BOOST **
+** WITHOUT CPU BOOST | NATIVE **
 benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
 -----------------------------------------------------------------------------------------------------------------------------
-2M floats (L3 cache)   12203    3.997s         327.592us ± 3.087us   (323.512us ... 383.735us)    329.914us  335.525us  337.298us
-530M floats            41       3.99s          97.321ms ± 404.725us  (96.792ms ... 98.107ms)      97.718ms   98.107ms   98.107ms
-Scalar                 518      3.996s         7.714ms ± 8.064us     (7.706ms ... 7.803ms)        7.715ms    7.75ms     7.757ms
-SSSE3                  11058    3.998s         361.601us ± 2.255us   (359.976us ... 390.835us)    363.833us  365.928us  367.951us
+2M floats (L3 cache)   24034    3.999s         166.407us ± 3.616us   (164.301us ... 435.644us)    166.205us  172.878us  174.11us
+530M floats            62       3.973s         64.087ms ± 193.429us  (63.844ms ... 64.619ms)      64.227ms   64.619ms   64.619ms
+Scalar                 517      3.994s         7.725ms ± 29.71us     (7.705ms ... 7.979ms)        7.73ms     7.954ms    7.978ms
+SIMD1                  2025     4s             1.975ms ± 12.941us    (1.962ms ... 2.233ms)        1.978ms    2.001ms    2.01ms
+SIMD2                  1841     4.001s         2.173ms ± 17.134us    (2.165ms ... 2.438ms)        2.173ms    2.2ms      2.25ms
+SIMD3                  1506     3.999s         2.655ms ± 17.848us    (2.646ms ... 2.92ms)         2.655ms    2.677ms    2.745ms
+
+
+** WITHOUT CPU BOOST | x86_64_v4 **
+benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
+-----------------------------------------------------------------------------------------------------------------------------
+2M floats (L3 cache)   24511    4s             163.227us ± 4.723us   (161.125us ... 461.744us)    163.109us  171.595us  180.452us
+530M floats            62       3.966s         63.981ms ± 135.033us  (63.839ms ... 64.467ms)      63.994ms   64.467ms   64.467ms
 ```
 
 To disable CPU boost on Linux:
