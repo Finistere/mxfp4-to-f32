@@ -17,3 +17,5 @@ devenv.local.yaml
 gpt-oss/
 gpt-oss-20b/
 data/
+
+callgrind.out.*

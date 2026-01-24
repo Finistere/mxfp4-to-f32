@@ -4,7 +4,7 @@ Zig 0.15 `std.io.Reader` for MXFP4 quantized F32 [gpt-oss](https://github.com/op
 
 The specification for MXFP4 can be found here: https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf. It does _not_ specify how data is stored, so this implementation is specific to GPT-OSS tensor layout.
 
-The implementation achieves an input throughput of 5.7 GB/s on recent x86 processors with AVX-512BW on 280MB of data and 2.2 GB/s without SIMD. More details in the benchmark section. SIMD detection is done at runtime.
+The implementation achieves an input throughput of 6.5 GB/s on recent x86 processors with AVX-512BW on 280MB of data and 2.7 GB/s without SIMD. More details in the benchmark section. SIMD detection is done at runtime.
 
 ## Usage
 
@@ -69,14 +69,15 @@ The first bench loads 1MB of blocks and 64KB of scales into memory, which fits i
 
 Here are the results in terms of input throughput:
 
-| arch                        | 2M (input GB/s) | 530M (input GB/s) |
-| --------------------------- | --------------: | ----------------: |
-| native with cpu boost       |             8.1 |               5.7 |
-| native without cpu boost    |             6.4 |               4.4 |
-| x86_64_v4 without cpu boost |             6.5 |               4.4 |
-| x86_64_v3 without cpu boost |             5.1 |               4.2 |
-| x86_64_v2 without cpu boost |             4.1 |               3.2 |
-| x86_64 without cpu boost    |             1.9 |               1.7 |
+| arch                                    | 2M (input GB/s) | 530M (input GB/s) |
+| --------------------------------------- | --------------: | ----------------: |
+| native with cpu boost                   |            11.6 |               6.4 |
+| x86_64 (no simd) with cpu boost         |             3.3 |               2.7 |
+| native without cpu boost                |             8.8 |               5.0 |
+| x86_64_v4 (avx-512bw) without cpu boost |             8.3 |               4.9 |
+| x86_64_v3 (avx2) without cpu boost      |             6.6 |               4.7 |
+| x86_64_v2 (ssse3) without cpu boost     |             4.2 |               3.2 |
+| x86_64 (no simd) without cpu boost      |             2.5 |               2.1 |
 
 ```sh
 zig build -Doptimize=ReleaseFast benchmark
@@ -89,55 +90,51 @@ Linux 6.18.5
 ** WITH CPU BOOST | NATIVE **
 benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
 -----------------------------------------------------------------------------------------------------------------------------
-2M floats (L3 cache)   30352    3.989s         131.425us ± 6.67us    (127.972us ... 898.19us)     130.757us  138.963us  146.147us
-530M floats            79       3.933s         49.788ms ± 381.681us  (49.13ms ... 50.826ms)       50.015ms   50.826ms   50.826ms
-Scalar                 675      3.99s          5.911ms ± 24.294us    (5.894ms ... 6.17ms)         5.913ms    5.987ms    6.168ms
-SIMD1                  2680     3.998s         1.491ms ± 12.969us    (1.487ms ... 1.757ms)        1.492ms    1.503ms    1.513ms
-SIMD2                  2410     3.998s         1.659ms ± 20.299us    (1.649ms ... 2.141ms)        1.66ms     1.729ms    1.742ms
-SIMD4                  1970     3.998s         2.029ms ± 18.347us    (2.018ms ... 2.294ms)        2.031ms    2.09ms     2.11ms
+2M floats (L3 cache)   42986    3.927s         91.365us ± 1.892us    (89.84us ... 121.741us)      90.972us   98.417us   99.608us
+530M floats            91       3.989s         43.836ms ± 336.29us   (43.276ms ... 45.804ms)      43.781ms   45.804ms   45.804ms
+
+
+** WITH CPU BOOST | x86_64 (no simd) **
+benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
+-----------------------------------------------------------------------------------------------------------------------------
+2M floats (L3 cache)   12341    4.004s         324.487us ± 19.961us  (308.574us ... 2.107ms)      325.125us  400.899us  425.265us
+530M floats            38       3.927s         103.344ms ± 817.229us (101.434ms ... 104.155ms)    103.854ms  104.155ms  104.155ms
 
 
 ** WITHOUT CPU BOOST | NATIVE **
 benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
 -----------------------------------------------------------------------------------------------------------------------------
-2M floats (L3 cache)   24034    3.999s         166.407us ± 3.616us   (164.301us ... 435.644us)    166.205us  172.878us  174.11us
-530M floats            62       3.973s         64.087ms ± 193.429us  (63.844ms ... 64.619ms)      64.227ms   64.619ms   64.619ms
-Scalar                 517      3.994s         7.725ms ± 29.71us     (7.705ms ... 7.979ms)        7.73ms     7.954ms    7.978ms
-SIMD1                  2025     4s             1.975ms ± 12.941us    (1.962ms ... 2.233ms)        1.978ms    2.001ms    2.01ms
-SIMD2                  1841     4.001s         2.173ms ± 17.134us    (2.165ms ... 2.438ms)        2.173ms    2.2ms      2.25ms
-SIMD4                  1506     3.999s         2.655ms ± 17.848us    (2.646ms ... 2.92ms)         2.655ms    2.677ms    2.745ms
+2M floats (L3 cache)   32979    3.995s         121.163us ± 1.94us    (119.766us ... 149.032us)    120.829us  127.25us   127.872us
+530M floats            70       3.955s         56.513ms ± 215.626us  (56.285ms ... 57.207ms)      56.557ms   57.207ms   57.207ms
+benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
 
 
-** WITHOUT CPU BOOST | x86_64_v4 **
+** WITHOUT CPU BOOST | x86_64_v4 (avx-512bw) **
 benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
 -----------------------------------------------------------------------------------------------------------------------------
-2M floats (L3 cache)   24511    4s             163.227us ± 4.723us   (161.125us ... 461.744us)    163.109us  171.595us  180.452us
-530M floats            62       3.966s         63.981ms ± 135.033us  (63.839ms ... 64.467ms)      63.994ms   64.467ms   64.467ms
+2M floats (L3 cache)   31090    3.996s         128.554us ± 2.047us   (126.71us ... 161.366us)     128.663us  135.006us  135.656us
+530M floats            69       3.984s         57.74ms ± 245.604us   (57.431ms ... 58.428ms)      57.902ms   58.428ms   58.428ms
 
 
-** WITHOUT CPU BOOST | x86_64_v3 **
+** WITHOUT CPU BOOST | x86_64_v3 (avx2) **
 benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
 -----------------------------------------------------------------------------------------------------------------------------
-2M floats (L3 cache)   19255    4.001s         207.806us ± 6.92us    (204.857us ... 487.412us)    207.974us  224.685us  230.567us
-530M floats            60       3.994s         66.566ms ± 1.021ms    (65.436ms ... 69.425ms)      67.343ms   69.425ms   69.425ms
+2M floats (L3 cache)   24931    3.991s         160.1us ± 2.284us     (158.18us ... 199.638us)     160.344us  166.886us  167.627us
+530M floats            66       3.955s         59.938ms ± 47.038us   (59.845ms ... 60.046ms)      59.97ms    60.046ms   60.046ms
 
-** WITHOUT CPU BOOST | x86_64_v2 **
+
+** WITHOUT CPU BOOST | x86_64_v2 (ssse3) **
 benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
 -----------------------------------------------------------------------------------------------------------------------------
-2M floats (L3 cache)   15610    4s             256.247us ± 5.612us   (253.489us ... 523.731us)    258.69us   263.689us  267.626us
-530M floats            44       3.914s         88.956ms ± 1.137ms    (87.913ms ... 92.137ms)      90.071ms   92.137ms   92.137ms
+2M floats (L3 cache)   15753    3.999s         253.877us ± 3.389us   (251.305us ... 339.483us)    256.525us  262.637us  265.102us
+530M floats            45       3.964s         88.11ms ± 85.221us    (87.97ms ... 88.363ms)       88.145ms   88.363ms   88.363ms
 
-** WITHOUT CPU BOOST | x86_64 **
+
+** WITHOUT CPU BOOST | x86_64 (no simd) **
 benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
 -----------------------------------------------------------------------------------------------------------------------------
-2M floats (L3 cache)   7275     3.998s         549.563us ± 10.037us  (539.749us ... 831.231us)    552.894us  568.013us  571.499us
-530M floats            23       3.869s         168.225ms ± 249.475us (167.836ms ... 168.577ms)    168.456ms  168.577ms  168.577ms
-
-** WITH CPU BOOST | x86_64 **
-benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
------------------------------------------------------------------------------------------------------------------------------
-2M floats (L3 cache)   9482     3.956s         417.293us ± 9.596us   (400.587us ... 685.717us)    420.175us  432.959us  435.814us
-530M floats            31       3.955s         127.604ms ± 793.986us (127.204ms ... 130.684ms)    127.407ms  130.684ms  130.684ms
+2M floats (L3 cache)   9461     3.998s         422.64us ± 3.372us    (419.373us ... 543.248us)    425.355us  430.655us  433.421us
+530M floats            30       3.964s         132.142ms ± 178.454us (131.89ms ... 132.527ms)     132.303ms  132.527ms  132.527ms
 
 ```
 

@@ -41,20 +41,22 @@ pub const GptOssReader = struct {
     fn stream_scalar(r: *std.io.Reader, w: *std.io.Writer, limit: std.io.Limit) std.io.Reader.StreamError!usize {
         const self: *GptOssReader = @fieldParentPtr("interface", r);
 
-        const block_count = try self.fill_up_to_complete_block(limit);
+        // Ensure we read at least one block up to as many as possible up to the limit.
+        const block_count = try self.fill_readers_up_to_complete_block(limit);
+
+        // We're reading/writing directly from/into the reader/writer buffers.
+        const scales_buffer = self.scales_reader.buffered();
+        const blocks_buffer = self.blocks_reader.buffered();
+        var output_slice = try w.writableSlice(block_count * mxfp4.BYTES_PER_F32_BLOCK);
 
         for (0..block_count) |i| {
-            const scale: u8 = self.scales_reader.buffered()[i];
-            const block = self.blocks_reader.buffered()[i * mxfp4.BLOCK_BYTES_SIZE .. (i + 1) * mxfp4.BLOCK_BYTES_SIZE];
-            const block_ptr = @as(*const [16]u8, @ptrCast(block.ptr));
-
-            const slice = try w.writableSlice(mxfp4.BYTES_PER_F32_BLOCK);
-            const output: *[mxfp4.BYTES_PER_F32_BLOCK]u8 = @ptrCast(slice.ptr);
-
-            mxfp4.dequantize.gpt_oss_one_block(scale, @bitCast(block_ptr.*), output);
+            const scale: u8 = scales_buffer[i];
+            const block: *const [16]u8 = @ptrCast(blocks_buffer[i * mxfp4.BLOCK_BYTES_SIZE .. (i + 1) * mxfp4.BLOCK_BYTES_SIZE].ptr);
+            const output: *[mxfp4.BYTES_PER_F32_BLOCK]u8 = @ptrCast(output_slice[i * mxfp4.BYTES_PER_F32_BLOCK .. (i + 1) * mxfp4.BYTES_PER_F32_BLOCK].ptr);
+            mxfp4.dequantize.gpt_oss_one_block(scale, @bitCast(block.*), output);
         }
 
-        try self.discard_blocks(block_count);
+        try self.discard_read_blocks(block_count);
         return block_count * mxfp4.BYTES_PER_F32_BLOCK;
     }
 
@@ -75,42 +77,36 @@ pub const GptOssReader = struct {
     fn stream_simd(comptime N: u8, r: *std.io.Reader, w: *std.io.Writer, limit: std.io.Limit) std.io.Reader.StreamError!usize {
         const self: *GptOssReader = @fieldParentPtr("interface", r);
 
-        const block_count = try self.fill_up_to_complete_block(limit);
+        // Ensure we read at least one block up to as many as possible up to the limit.
+        const block_count = try self.fill_readers_up_to_complete_block(limit);
 
+        // We're reading/writing directly from/into the reader/writer buffers.
         const scales_buffer = self.scales_reader.buffered();
         const blocks_buffer = self.blocks_reader.buffered();
+        var output_slice = try w.writableSlice(block_count * mxfp4.BYTES_PER_F32_BLOCK);
 
         // First process as many blocks as possible in SIMD with the highest possible width.
         const simd_blocks = block_count / N;
         for (0..simd_blocks) |i| {
-            const scales_ptr: *[N]u8 = @ptrCast(scales_buffer[i * N .. (i + 1) * N].ptr);
-            const scales: [N]u8 = scales_ptr.*;
-            const block = blocks_buffer[(i * mxfp4.BLOCK_BYTES_SIZE * N) .. (i + 1) * mxfp4.BLOCK_BYTES_SIZE * N];
-            const block_ptr = @as(*const [N * 16]u8, @ptrCast(block.ptr));
-
-            // Here we use the blocks reader buffer directly avoiding a costly copy.
-            const slice = try w.writableSlice(mxfp4.BYTES_PER_F32_BLOCK * N);
-            const output: *[mxfp4.BYTES_PER_F32_BLOCK * N]u8 = @ptrCast(slice.ptr);
-            mxfp4.dequantize.gpt_oss_blocks_simd(N, scales, @bitCast(block_ptr.*), output);
+            const scales: *const [N]u8 = @ptrCast(scales_buffer[i * N .. (i + 1) * N].ptr);
+            const blocks: *const [N * 16]u8 = @ptrCast(blocks_buffer[(i * mxfp4.BLOCK_BYTES_SIZE * N) .. (i + 1) * mxfp4.BLOCK_BYTES_SIZE * N].ptr);
+            const output: *[N * mxfp4.BYTES_PER_F32_BLOCK]u8 = @ptrCast(output_slice[i * N * mxfp4.BYTES_PER_F32_BLOCK .. (i + 1) * N * mxfp4.BYTES_PER_F32_BLOCK].ptr);
+            mxfp4.dequantize.gpt_oss_blocks_simd(N, scales.*, @bitCast(blocks.*), output);
         }
 
         // Process remaining blocks one by one.
         for ((simd_blocks * N)..block_count) |i| {
             const scales: [1]u8 = .{scales_buffer[i]};
-            const block = blocks_buffer[(i * mxfp4.BLOCK_BYTES_SIZE) .. (i + 1) * mxfp4.BLOCK_BYTES_SIZE];
-            const block_ptr = @as(*const [16]u8, @ptrCast(block.ptr));
-
-            // Here we use the blocks reader buffer directly avoiding a costly copy.
-            const slice = try w.writableSlice(mxfp4.BYTES_PER_F32_BLOCK);
-            const output: *[mxfp4.BYTES_PER_F32_BLOCK]u8 = @ptrCast(slice.ptr);
-            mxfp4.dequantize.gpt_oss_blocks_simd(1, scales, @bitCast(block_ptr.*), output);
+            const blocks: *const [16]u8 = @ptrCast(blocks_buffer[(i * mxfp4.BLOCK_BYTES_SIZE) .. (i + 1) * mxfp4.BLOCK_BYTES_SIZE].ptr);
+            const output: *[mxfp4.BYTES_PER_F32_BLOCK]u8 = @ptrCast(output_slice[i * mxfp4.BYTES_PER_F32_BLOCK .. (i + 1) * mxfp4.BYTES_PER_F32_BLOCK].ptr);
+            mxfp4.dequantize.gpt_oss_blocks_simd(1, scales, @bitCast(blocks.*), output);
         }
 
-        try self.discard_blocks(block_count);
+        try self.discard_read_blocks(block_count);
         return block_count * mxfp4.BYTES_PER_F32_BLOCK;
     }
 
-    fn fill_up_to_complete_block(self: *GptOssReader, limit: std.io.Limit) std.io.Reader.StreamError!usize {
+    fn fill_readers_up_to_complete_block(self: *GptOssReader, limit: std.io.Limit) std.io.Reader.StreamError!usize {
         const blocks_limit = @intFromEnum(limit) / mxfp4.BYTES_PER_F32_BLOCK;
 
         // TODO: Here we assume that readers use a big enough buffer to at least retrieve one block of f32.
@@ -150,7 +146,7 @@ pub const GptOssReader = struct {
         return block_count;
     }
 
-    fn discard_blocks(self: *GptOssReader, count: usize) !void {
+    inline fn discard_read_blocks(self: *GptOssReader, count: usize) !void {
         try self.scales_reader.discardAll(count);
         try self.blocks_reader.discardAll(count * mxfp4.BLOCK_BYTES_SIZE);
     }
