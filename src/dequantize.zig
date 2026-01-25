@@ -42,7 +42,7 @@ const E2M1_DOUBLED_LUT_4: @Vector(64, i8) = @bitCast([_]i8{ 0, 1, 2, 3, 4, 6, 8,
 pub fn gpt_oss_blocks_simd(comptime N: usize, scales_e8m0: [N]u8, blocks_e2m1: @Vector(N * 16, u8), output: *[N * mxfp4.BYTES_PER_F32_BLOCK]u8) void {
     comptime {
         if (N != 1 and N != 2 and N != 4)
-            @compileError("blocks must be 1, 2, or 4");
+            @compileError("N (block count) must be 1, 2, or 4 to match a supported SIMD width.");
     }
 
     const hinibble = blocks_e2m1 >> @as(@Vector(N * 16, u3), @splat(@as(u3, 4)));
@@ -65,13 +65,14 @@ pub fn gpt_oss_blocks_simd(comptime N: usize, scales_e8m0: [N]u8, blocks_e2m1: @
         const block_i8_ptr: *const [32]i8 = @ptrCast(arr_i8[i * 32 .. (i + 1) * 32].ptr);
         const block_i8: @Vector(32, i8) = @bitCast(block_i8_ptr.*);
         const values_f32: @Vector(32, f32) = @floatFromInt(block_i8);
-        const scale: @Vector(32, f32) = @splat(e8m0_to_fp32_half_lut(scales_e8m0[i]));
+        const scale: @Vector(32, f32) = @splat(E8M0_HALF_LUT[scales_e8m0[i]]);
         const result: @Vector(32, f32) = values_f32 * scale;
         const arr: *const [128]u8 = @ptrCast(&result);
         @memcpy(output[i * 128 .. (i + 1) * 128], arr[0..]);
     }
 }
 
+// Slightly faster than computing on the fly on aarch64, less evident on x86. Valgrind does indicate it's faster.
 const E8M0_HALF_LUT: [256]f32 = blk: {
     var lut: [256]f32 = undefined;
     for (0..256) |i| {
@@ -80,16 +81,6 @@ const E8M0_HALF_LUT: [256]f32 = blk: {
     break :blk lut;
 };
 
-fn e8m0_to_fp32_half_lut(x: u8) f32 {
-    return E8M0_HALF_LUT[@as(usize, x)];
-}
-
-// I've considered both using SIMD and a LUT for e8m0, neither show evident gains.
-// - SIMD: I've tried benchmarking reading a sales file with SIMD (@select) and without,
-//   I couldn't come to a clear winner. It might be just me, but given that reading scales through SIMD
-//   would complicate the std.io.Reader I didn't continue this path.
-// - LUT: I've tried a 256-entry LUT for e8m0 to f32. Valgrind considered it faster, but the benchmarks were within the variance.
-//   So keeping the simplest implementation for now.
 fn e8m0_to_fp32_half(x: u8) f32 {
     if (x < 2) {
         // Denorm/low exponent path used by ggml_e8m0_to_fp32_half.
