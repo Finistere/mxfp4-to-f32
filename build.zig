@@ -87,6 +87,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    exe.lto = .full;
     exe.root_module.addImport("zbench", zbench_module);
 
     const emitted_asm = exe.getEmittedAsm();
