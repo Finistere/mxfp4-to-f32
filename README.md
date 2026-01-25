@@ -6,10 +6,10 @@ The specification for MXFP4 can be found here: https://www.opencompute.org/docum
 
 SIMD support for SSE3, AVX2 and AVX-512BW on x86 and NEON on aarch64.
 
-The implementation processes 280MB of data (scales + blocks) in:
+The implementation processes 280MB of data (scales + blocks) on:
 
-- amd7950x: 44ms | 6.4GB/s in | 48.4GB/s out
-- M2: 73ms | 3.9GB/s in | 29.1GB/s out
+- amd7950x in 44ms at 6.4GB/s in | 48.4GB/s out
+- M2 in 73ms at 3.9GB/s in | 29.1GB/s out
 
 For AVX support I had to use the LLVM backend of Zig.
 

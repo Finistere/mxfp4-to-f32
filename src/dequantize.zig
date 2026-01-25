@@ -59,18 +59,29 @@ pub fn gpt_oss_blocks_simd(comptime N: usize, scales_e8m0: [N]u8, blocks_e2m1: @
     const values_i8: @Vector(N * 32, i8) = std.simd.interlace(.{ lovalues, hivalues });
     const arr_i8: [N * 32]u8 = @bitCast(values_i8);
 
-    //
-    // Even with AVX-512 we can multiply at most 16 f32, so process values mxfp4 block by block to have a single scale
+    // Even with AVX-512 we can multiply at most 16 f32, so we process values mxfp4 block by block to have a single scale
     // and let Zig figure out the best way to do all of this with SIMD.
     for (0..N) |i| {
         const block_i8_ptr: *const [32]i8 = @ptrCast(arr_i8[i * 32 .. (i + 1) * 32].ptr);
         const block_i8: @Vector(32, i8) = @bitCast(block_i8_ptr.*);
         const values_f32: @Vector(32, f32) = @floatFromInt(block_i8);
-        const scale: @Vector(32, f32) = @splat(e8m0_to_fp32_half(scales_e8m0[i]));
+        const scale: @Vector(32, f32) = @splat(e8m0_to_fp32_half_lut(scales_e8m0[i]));
         const result: @Vector(32, f32) = values_f32 * scale;
         const arr: *const [128]u8 = @ptrCast(&result);
         @memcpy(output[i * 128 .. (i + 1) * 128], arr[0..]);
     }
+}
+
+const E8M0_HALF_LUT: [256]f32 = blk: {
+    var lut: [256]f32 = undefined;
+    for (0..256) |i| {
+        lut[i] = e8m0_to_fp32_half(@as(u8, i));
+    }
+    break :blk lut;
+};
+
+fn e8m0_to_fp32_half_lut(x: u8) f32 {
+    return E8M0_HALF_LUT[@as(usize, x)];
 }
 
 // I've considered both using SIMD and a LUT for e8m0, neither show evident gains.

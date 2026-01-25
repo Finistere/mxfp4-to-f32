@@ -160,7 +160,7 @@ pub fn main() !void {
     // defer dequantize_simd4_benchmark.deinit(allocator);
 
     var bench = zbench.Benchmark.init(allocator, .{
-        .time_budget_ns = 4 * 1_000_000_000,
+        .time_budget_ns = 6 * 1_000_000_000,
     });
     defer bench.deinit();
     try bench.addParam("2M floats (L3 cache)", &l3_cache_reader_benchmark, .{});
