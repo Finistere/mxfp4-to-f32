@@ -9,7 +9,7 @@ SIMD support for SSE3, AVX2, and AVX-512BW on x86 and NEON on aarch64.
 For 282MB of GPT-OSS tensor data (scales + blocks) on:
 
 - AMD 7950X3D takes 44ms at 6.4GB/s in | 48.5GB/s out
-- Apple M2 takes 72ms at 3.9GB/s in | 29.7GB/s out
+- Apple M2 Max takes 72ms at 3.9GB/s in | 29.7GB/s out
 
 For AVX support I had to use the LLVM backend of Zig.
 
