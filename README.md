@@ -4,7 +4,7 @@ Zig 0.15 `std.io.Reader` for MXFP4 quantized F32 [gpt-oss](https://github.com/op
 
 The specification for MXFP4 can be found here: https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf. It does _not_ specify how data is stored, so this implementation is specific to GPT-OSS tensor layout.
 
-SIMD support for SSE3, AVX2, and AVX-512BW on x86 and NEON on aarch64.
+SIMD support for SSE3, AVX2, and AVX-512BW on x86, NEON on aarch64 and scalar fallback.
 
 For GPT-OSS tensor data (scales + blocks):
 
