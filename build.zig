@@ -88,7 +88,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    // FIXME: LLD has troubles for Apple M2 with LTO: using LLD to link macho files is unsupported
+    // LTO doesn't really work with Apple. Zig requires LLD which doesn't support LTO on Apple silicon
     if (target.result.cpu.arch.isX86()) {
         exe.lto = .full;
     }
