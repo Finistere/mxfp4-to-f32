@@ -2,8 +2,7 @@
   pkgs,
   lib,
   ...
-}:
-let
+}: let
   buildInputs = with pkgs; [
     stdenv.cc.cc
     libuv
@@ -11,8 +10,7 @@ let
     libxml2
     cmake
   ];
-in
-{
+in {
   env = {
     LD_LIBRARY_PATH = "${lib.makeLibraryPath buildInputs}";
     CMAKE_PREFIX_PATH = "${pkgs.zlib}:${pkgs.zlib.dev}:${pkgs.libxml2}:${pkgs.libxml2.dev}";
@@ -21,6 +19,7 @@ in
   };
   packages = with pkgs; [
     zlib
+    bolt_21
   ];
   languages.python = {
     enable = true;

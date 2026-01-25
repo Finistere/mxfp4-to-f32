@@ -9,12 +9,12 @@ SIMD support for SSSE3, AVX2, and AVX-512BW on x86, NEON on aarch64, and scalar 
 For GPT-OSS tensor data (scales + blocks):
 
 - 282MB on:
-  - AMD 7950X3D takes 44ms at 6.4GB/s in | 48.5GB/s out
-  - Apple M2 Max takes 72ms at 3.9GB/s in | 29.7GB/s out
+  - AMD 7950X3D takes 44ms at 6.0GiB/s in | 45.3GiB/s out
+  - Apple M2 Max takes 72ms at 3.7GiB/s in | 27.6GiB/s out
 
 - 1MB (fits in L3) on:
-  - AMD 7950X3D takes 90us at 11.8GB/s in | 89.0GB/s out
-  - Apple M2 Max takes 184us at 5.8GB/s in | 43.5GB/s out
+  - AMD 7950X3D takes 84us at 11.7GiB/s in | 88.5GiB/s out
+  - Apple M2 Max takes 184us at 5.4GiB/s in | 40.5GiB/s out
 
 For AVX support I had to use the LLVM backend of Zig.
 
@@ -81,16 +81,16 @@ The first bench loads 1MB of blocks and 64KB of scales into memory, which fits i
 
 Here are the results in terms of throughput:
 
-| arch                                    | 2M (input GB/s) | 2M (output GB/s) | 530M (input GB/s) | 530M (output GB/s) |
-| --------------------------------------- | --------------: | ---------------: | ----------------: | -----------------: |
-| native with cpu boost                   |            11.8 |             89.0 |               6.4 |               48.5 |
-| x86_64 (no simd) with cpu boost         |             3.3 |             25.1 |               2.8 |               20.8 |
-| native without cpu boost                |             9.2 |             69.2 |               5.1 |               38.1 |
-| x86_64_v4 (avx-512bw) without cpu boost |             8.7 |             65.5 |               5.0 |               37.7 |
-| x86_64_v3 (avx2) without cpu boost      |             7.2 |             54.4 |               4.9 |               36.8 |
-| x86_64_v2 (ssse3) without cpu boost     |             4.4 |             33.2 |               3.2 |               24.4 |
-| x86_64 (no simd) without cpu boost      |             2.5 |             19.1 |               2.1 |               16.0 |
-| Apple M2 Max (native)                   |             5.8 |             43.5 |               3.9 |               29.7 |
+| arch                                    | 2M (input GiB/s) | 2M (output GiB/s) | 530M (input GiB/s) | 530M (output GiB/s) |
+| --------------------------------------- | ---------------: | ----------------: | -----------------: | ------------------: |
+| native with cpu boost                   |             11.7 |              88.5 |                6.0 |                45.3 |
+| x86_64 (no simd) with cpu boost         |              3.1 |              23.3 |                2.5 |                19.1 |
+| native without cpu boost                |              8.8 |              66.2 |                4.7 |                35.4 |
+| x86_64_v4 (avx-512bw) without cpu boost |              8.4 |              63.3 |                4.6 |                35.0 |
+| x86_64_v3 (avx2) without cpu boost      |              8.3 |              62.6 |                4.6 |                34.3 |
+| x86_64_v2 (ssse3) without cpu boost     |              4.1 |              31.1 |                3.0 |                22.7 |
+| x86_64 (no simd) without cpu boost      |              2.4 |              17.8 |                2.0 |                15.0 |
+| Apple M2 Max (native)                   |              5.4 |              40.5 |                3.7 |                27.6 |
 
 ```sh
 zig build -Doptimize=ReleaseFast benchmark
@@ -173,4 +173,21 @@ Be sure to have `strip = false` in `build.zig`.
 # My Valgrind doesn't support more recent instructions.
 zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux -Dcpu=x86_64_v3 benchmark
 valgrind --tool=callgrind --dump-instr=yes --collect-jumps=yes ./zig-out/bin/mxfp4
+```
+
+## PGO / BOLT
+
+Can not use PGO with Zig code AFAIK.
+
+I've tried using BOLT 21 but without any success. Benchmarks results were the same. Here are the steps I followed:
+
+```zig
+// build.zig
+exe.link_emit_relocs = true;
+```
+
+```sh
+perf record -e cycles:u -j any,u -o perf.data ./zig-out/bin/mxfp4
+perf2bolt ./zig-out/bin/mxfp4 -perfdata=perf.data -o app.fdata
+llvm-bolt ./zig-out/bin/mxfp4 -o mxfp4.bolt -data=app.fdata -reorder-blocks=ext-tsp -reorder-functions=cdsort -split-functions -split-all-cold -split-eh -dyno-stats
 ```
