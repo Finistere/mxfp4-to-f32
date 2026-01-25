@@ -11,6 +11,11 @@ SIMD support for SSE3, AVX2, and AVX-512BW on x86 and NEON on aarch64.
 - AMD 7950X3D takes 44ms at 6.4GB/s in | 48.5GB/s out
 - Apple M2 Max takes 72ms at 3.9GB/s in | 29.7GB/s out
 
+1MB of data (fits in L3) on:
+
+- AMD 7950X3D takes 90us at 11.8GB/s in | 89.0GB/s out
+- Apple M2 Max takes 184us at 5.8GB/s in | 43.5GB/s out
+
 For AVX support I had to use the LLVM backend of Zig.
 
 ## Usage
