@@ -25,7 +25,7 @@ pub const GptOssReader = struct {
         if (endianness != builtin.target.cpu.arch.endian()) @panic("Only native endianness is supported by this adapter.");
 
         const interface = std.io.Reader{
-            .vtable = switch (mxfp4.dequantize.simdBlockWidth()) {
+            .vtable = switch (comptime mxfp4.dequantize.simdBlockWidth()) {
                 4 => &SIMD4_VTABLE,
                 2 => &SIMD2_VTABLE,
                 1 => &SIMD1_VTABLE,

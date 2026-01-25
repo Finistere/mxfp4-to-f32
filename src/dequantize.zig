@@ -92,21 +92,9 @@ fn e8m0_to_fp32_half(x: u8) f32 {
 
 pub fn simdBlockWidth() u8 {
     const target = builtin.target;
-    var query = std.Target.Query.fromTarget(&target);
-    query.cpu_model = .native;
-    const runtime_target = std.zig.system.resolveTargetQuery(query) catch return 0;
-
-    // We need both the compilation target and the current CPU to support the instructions.
-    if (comptime target.cpu.has(.x86, .avx512bw)) {
-        if (runtime_target.cpu.has(.x86, .avx512bw)) return 4;
-        if (runtime_target.cpu.has(.x86, .avx2)) return 2;
-        if (runtime_target.cpu.has(.x86, .ssse3)) return 1;
-    } else if (comptime target.cpu.has(.x86, .avx2)) {
-        if (runtime_target.cpu.has(.x86, .avx2)) return 2;
-        if (runtime_target.cpu.has(.x86, .ssse3)) return 1;
-    } else if (comptime target.cpu.has(.x86, .ssse3)) {
-        if (runtime_target.cpu.has(.x86, .ssse3)) return 1;
-    }
+    if (target.cpu.has(.x86, .avx512bw)) return 4;
+    if (target.cpu.has(.x86, .avx2)) return 2;
+    if (target.cpu.has(.x86, .ssse3)) return 1;
     return 0;
 }
 
@@ -127,8 +115,6 @@ fn pack_shuffle_bytes(table: anytype, mask: anytype) @TypeOf(table) {
     const lanes = @typeInfo(T).vector.len;
     const cpu = builtin.target.cpu;
 
-    // We rely on runtime detection to ensure the instructions really are available.
-    // We still need to check that the target we compile for does support them though.
     if (comptime lanes == 64 and cpu.has(.x86, .avx512bw)) {
         var dst = table;
         asm volatile ("vpshufb %[mask], %[src], %[dst]"
@@ -151,22 +137,6 @@ fn pack_shuffle_bytes(table: anytype, mask: anytype) @TypeOf(table) {
             : [dst] "+x" (dst),
             : [mask] "x" (mask),
             : .{});
-        return dst;
-    } else if (comptime lanes % 16 == 0) {
-        // FIXME: Fallback implementation that shouldn't be used, I'm just not really sure how to properly handle
-        // runtime detection to be honest. This function should only be called if SIMD is available in the first place.
-        var dst: @TypeOf(table) = undefined;
-        for (0..(lanes / 16)) |v| {
-            const offset = v * 16;
-            for (0..16) |i| {
-                const index = mask[offset + i];
-                if (index & 0x80 != 0) {
-                    dst[offset + i] = 0;
-                } else {
-                    dst[offset + i] = table[offset + @as(usize, index)];
-                }
-            }
-        }
         return dst;
     } else {
         @compileError("Unsupported vector length or missing CPU feature");
