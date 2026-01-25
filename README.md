@@ -4,7 +4,12 @@ Zig 0.15 `std.io.Reader` for MXFP4 quantized F32 [gpt-oss](https://github.com/op
 
 The specification for MXFP4 can be found here: https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf. It does _not_ specify how data is stored, so this implementation is specific to GPT-OSS tensor layout.
 
-The implementation achieves an input throughput of 6.5 GB/s on recent x86 processors with AVX-512BW on 280MB of data and 2.7 GB/s without SIMD. More details in the benchmark section.
+SIMD support for SSE3, AVX2 and AVX-512BW on x86 and NEON on aarch64.
+
+The implementation processes 280MB of data (scales + blocks) in:
+
+- amd7950x: 44ms | 6.4GB/s in | 48.4GB/s out
+- M2: 73ms | 3.9GB/s in | 29.1GB/s out
 
 For AVX support I had to use the LLVM backend of Zig.
 
@@ -69,17 +74,18 @@ The first bench loads 1MB of blocks and 64KB of scales into memory, which fits i
 - x86_64_v3 -> AVX2: 2 blocks at a time.
 - x86_64_v4 -> AVX-512BW: 4 blocks at a time.
 
-Here are the results in terms of input throughput:
+Here are the results in terms of throughput (2M = 2,000,000 floats, 530M = 530,000,000 floats; input uses 17 bytes per 32 floats, output is f32):
 
-| arch                                    | 2M (input GB/s) | 530M (input GB/s) |
-| --------------------------------------- | --------------: | ----------------: |
-| native with cpu boost                   |            11.6 |               6.4 |
-| x86_64 (no simd) with cpu boost         |             3.3 |               2.7 |
-| native without cpu boost                |             8.8 |               5.0 |
-| x86_64_v4 (avx-512bw) without cpu boost |             8.3 |               4.9 |
-| x86_64_v3 (avx2) without cpu boost      |             6.6 |               4.7 |
-| x86_64_v2 (ssse3) without cpu boost     |             4.2 |               3.2 |
-| x86_64 (no simd) without cpu boost      |             2.5 |               2.1 |
+| arch                                    | 2M (input GB/s) | 2M (output GB/s) | 530M (input GB/s) | 530M (output GB/s) |
+| --------------------------------------- | --------------: | ---------------: | ----------------: | -----------------: |
+| native with cpu boost                   |            12.1 |             91.2 |               6.4 |               48.4 |
+| x86_64 (no simd) with cpu boost         |             3.3 |             24.7 |               2.7 |               20.5 |
+| native without cpu boost                |             9.1 |             68.8 |               5.0 |               37.6 |
+| x86_64_v4 (avx-512bw) without cpu boost |             8.8 |             66.6 |               4.9 |               36.7 |
+| x86_64_v3 (avx2) without cpu boost      |             7.2 |             54.2 |               4.7 |               35.4 |
+| x86_64_v2 (ssse3) without cpu boost     |             4.3 |             32.1 |               3.2 |               24.1 |
+| x86_64 (no simd) without cpu boost      |             2.5 |             18.9 |               2.1 |               16.0 |
+| Apple M2 Max (native)                   |             5.7 |             42.6 |               3.9 |               29.1 |
 
 ```sh
 zig build -Doptimize=ReleaseFast benchmark
@@ -92,7 +98,7 @@ Linux 6.18.5
 ** WITH CPU BOOST | NATIVE **
 benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
 -----------------------------------------------------------------------------------------------------------------------------
-2M floats (L3 cache)   42986    3.927s         91.365us ± 1.892us    (89.84us ... 121.741us)      90.972us   98.417us   99.608us
+2M floats (L3 cache)   45460    3.987s         87.706us ± 1.28us     (86.935us ... 117.343us)     87.386us   91.915us   92.555us
 530M floats            91       3.989s         43.836ms ± 336.29us   (43.276ms ... 45.804ms)      43.781ms   45.804ms   45.804ms
 
 
@@ -106,29 +112,28 @@ benchmark              runs     total time     time/run (avg ± σ)    (min ... 
 ** WITHOUT CPU BOOST | NATIVE **
 benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
 -----------------------------------------------------------------------------------------------------------------------------
-2M floats (L3 cache)   32979    3.995s         121.163us ± 1.94us    (119.766us ... 149.032us)    120.829us  127.25us   127.872us
-530M floats            70       3.955s         56.513ms ± 215.626us  (56.285ms ... 57.207ms)      56.557ms   57.207ms   57.207ms
-benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
+2M floats (L3 cache)   34408    4s             116.28us ± 2.485us    (115.088us ... 166.235us)    115.649us  122.583us  130.077us
+530M floats            71       4s             56.348ms ± 203.154us  (56.024ms ... 56.79ms)       56.474ms   56.79ms    56.79ms
 
 
 ** WITHOUT CPU BOOST | x86_64_v4 (avx-512bw) **
 benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
 -----------------------------------------------------------------------------------------------------------------------------
-2M floats (L3 cache)   31090    3.996s         128.554us ± 2.047us   (126.71us ... 161.366us)     128.663us  135.006us  135.656us
+2M floats (L3 cache)   33312    4.002s         120.146us ± 1.797us   (118.655us ... 153.1us)      119.878us  125.969us  126.81us
 530M floats            69       3.984s         57.74ms ± 245.604us   (57.431ms ... 58.428ms)      57.902ms   58.428ms   58.428ms
 
 
 ** WITHOUT CPU BOOST | x86_64_v3 (avx2) **
 benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
 -----------------------------------------------------------------------------------------------------------------------------
-2M floats (L3 cache)   24931    3.991s         160.1us ± 2.284us     (158.18us ... 199.638us)     160.344us  166.886us  167.627us
+2M floats (L3 cache)   27073    3.997s         147.666us ± 1.437us   (146.558us ... 159.883us)    147.239us  152.419us  152.76us
 530M floats            66       3.955s         59.938ms ± 47.038us   (59.845ms ... 60.046ms)      59.97ms    60.046ms   60.046ms
 
 
 ** WITHOUT CPU BOOST | x86_64_v2 (ssse3) **
 benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
 -----------------------------------------------------------------------------------------------------------------------------
-2M floats (L3 cache)   15753    3.999s         253.877us ± 3.389us   (251.305us ... 339.483us)    256.525us  262.637us  265.102us
+2M floats (L3 cache)   15982    3.988s         249.532us ± 1.937us   (247.669us ... 264.591us)    250.885us  255.074us  255.745us
 530M floats            45       3.964s         88.11ms ± 85.221us    (87.97ms ... 88.363ms)       88.145ms   88.363ms   88.363ms
 
 
@@ -138,6 +143,15 @@ benchmark              runs     total time     time/run (avg ± σ)    (min ... 
 2M floats (L3 cache)   9461     3.998s         422.64us ± 3.372us    (419.373us ... 543.248us)    425.355us  430.655us  433.421us
 530M floats            30       3.964s         132.142ms ± 178.454us (131.89ms ... 132.527ms)     132.303ms  132.527ms  132.527ms
 
+```
+
+```
+Apple M2 Max
+
+benchmark              runs     total time     time/run (avg ± σ)    (min ... max)                p75        p99        p995
+-----------------------------------------------------------------------------------------------------------------------------
+2M floats (L3 cache)   21225    3.982s         187.646us ± 5.625us   (183.666us ... 247.833us)    190.917us  206.25us   211.625us
+530M floats            54       3.938s         72.942ms ± 796.889us  (71.059ms ... 76.67ms)       73.348ms   76.67ms    76.67ms
 ```
 
 To disable CPU boost on Linux:
