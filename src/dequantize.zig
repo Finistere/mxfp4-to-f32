@@ -54,8 +54,8 @@ pub fn gpt_oss_blocks_simd(comptime N: usize, scales_e8m0: [N]u8, blocks_e2m1: @
         4 => E2M1_DOUBLED_LUT_4,
         else => unreachable,
     };
-    const hivalues = pack_shuffle_bytes(lut, hinibble);
-    const lovalues = pack_shuffle_bytes(lut, lonibble);
+    const hivalues = shuffle(lut, hinibble);
+    const lovalues = shuffle(lut, lonibble);
     const values_i8: @Vector(N * 32, i8) = std.simd.interlace(.{ lovalues, hivalues });
     const arr_i8: [N * 32]u8 = @bitCast(values_i8);
 
@@ -92,16 +92,23 @@ fn e8m0_to_fp32_half(x: u8) f32 {
 
 pub fn simdBlockWidth() u8 {
     const target = builtin.target;
+    if (target.cpu.arch.isAARCH64()) return 1;
     if (target.cpu.has(.x86, .avx512bw)) return 4;
     if (target.cpu.has(.x86, .avx2)) return 2;
     if (target.cpu.has(.x86, .ssse3)) return 1;
     return 0;
 }
 
-/// https://www.felixcloutier.com/x86/pshufb
 /// Performs a byte-wise shuffle of the first operand (table) according to the indices specified in the second operand (mask).
+/// The difference with @shuffle is that the mask is not comptime.
+///
+/// For x86/x86_64: SSSE3+ for 128-bit vectors, AVX2+ for 256-bit vectors, AVX-512BW+ for 512-bit vectors.
+/// https://www.felixcloutier.com/x86/pshufb
 /// This function required the LLVM backend for the AVX variants.
-fn pack_shuffle_bytes(table: anytype, mask: anytype) @TypeOf(table) {
+///
+/// For AArch64: TBL instruction for 128-bit vectors from NEON.
+///
+fn shuffle(table: anytype, mask: anytype) @TypeOf(table) {
     const T = @TypeOf(table);
     comptime {
         switch (@typeInfo(T)) {
@@ -136,6 +143,14 @@ fn pack_shuffle_bytes(table: anytype, mask: anytype) @TypeOf(table) {
         asm volatile ("pshufb %[mask], %[dst]"
             : [dst] "+x" (dst),
             : [mask] "x" (mask),
+            : .{});
+        return dst;
+    } else if (comptime lanes == 16 and cpu.arch.isAARCH64()) {
+        var dst = table;
+        asm volatile ("tbl %[dst].16b, { %[src].16b }, %[mask].16b"
+            : [dst] "=w" (dst),
+            : [src] "w" (table),
+              [mask] "w" (mask),
             : .{});
         return dst;
     } else {

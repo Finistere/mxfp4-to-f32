@@ -2,11 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 const mxfp4 = @import("root.zig");
 
-const SCALAR_VTABLE = std.io.Reader.VTable{ .stream = GptOssReader.stream_scalar };
-const SIMD1_VTABLE = std.io.Reader.VTable{ .stream = GptOssReader.stream_simd1 };
-const SIMD2_VTABLE = std.io.Reader.VTable{ .stream = GptOssReader.stream_simd2 };
-const SIMD4_VTABLE = std.io.Reader.VTable{ .stream = GptOssReader.stream_simd4 };
-
 /// https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
 /// An io.Reader adapter that reads MXFP4 compressed data from two underlying readers for the scales and blocks.
 ///
@@ -14,7 +9,6 @@ const SIMD4_VTABLE = std.io.Reader.VTable{ .stream = GptOssReader.stream_simd4 }
 pub const GptOssReader = struct {
     blocks_reader: *std.io.Reader,
     scales_reader: *std.io.Reader,
-    f32_block: [mxfp4.VALUES_PER_BLOCK]f32,
     interface: std.io.Reader,
 
     pub fn init(blocks_reader: *std.io.Reader, scales_reader: *std.io.Reader, buffer: []u8, comptime endianness: std.builtin.Endian) GptOssReader {
@@ -26,16 +20,16 @@ pub const GptOssReader = struct {
 
         const interface = std.io.Reader{
             .vtable = switch (comptime mxfp4.dequantize.simdBlockWidth()) {
-                4 => &SIMD4_VTABLE,
-                2 => &SIMD2_VTABLE,
-                1 => &SIMD1_VTABLE,
-                else => &SCALAR_VTABLE,
+                4 => &.{ .stream = stream_simd4 },
+                2 => &.{ .stream = stream_simd2 },
+                1 => &.{ .stream = stream_simd1 },
+                else => &.{ .stream = stream_scalar },
             },
             .buffer = buffer,
             .seek = 0,
             .end = 0,
         };
-        return GptOssReader{ .blocks_reader = blocks_reader, .scales_reader = scales_reader, .f32_block = undefined, .interface = interface };
+        return GptOssReader{ .blocks_reader = blocks_reader, .scales_reader = scales_reader, .interface = interface };
     }
 
     fn stream_scalar(r: *std.io.Reader, w: *std.io.Writer, limit: std.io.Limit) std.io.Reader.StreamError!usize {
