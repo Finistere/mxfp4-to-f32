@@ -4,12 +4,12 @@ Zig 0.15 `std.io.Reader` for MXFP4 quantized F32 [gpt-oss](https://github.com/op
 
 The specification for MXFP4 can be found here: https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf. It does _not_ specify how data is stored, so this implementation is specific to GPT-OSS tensor layout.
 
-SIMD support for SSE3, AVX2 and AVX-512BW on x86 and NEON on aarch64.
+SIMD support for SSE3, AVX2, and AVX-512BW on x86 and NEON on aarch64.
 
-The implementation processes 280MB of data (scales + blocks) on:
+For 280MB of data (scales + blocks) on:
 
-- AMD 7950X3D in 44ms at 6.4GB/s in | 48.5GB/s out
-- Apple M2 in 72ms at 3.9GB/s in | 29.7GB/s out
+- AMD 7950X3D takes 44ms at 6.4GB/s in | 48.5GB/s out
+- Apple M2 takes 72ms at 3.9GB/s in | 29.7GB/s out
 
 For AVX support I had to use the LLVM backend of Zig.
 
