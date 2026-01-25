@@ -13,14 +13,18 @@ pub fn gpt_oss_one_block(scale_e8m0: u8, block_e2m1: [mxfp4.BLOCK_BYTES_SIZE]u8,
     const scale = e8m0_to_fp32(scale_e8m0);
 
     var i: usize = 0;
-    while (i < 16) : (i += 1) {
+    while (i < mxfp4.BLOCK_BYTES_SIZE) : (i += 1) {
         // Each following byte contains two 4-bit indices into kvalues.
         const byte = block_e2m1[i];
         const low = byte & 0x0F;
         const high = byte >> 4;
 
-        @memcpy(output[(i * 2) * 4 .. (i * 2) * 4 + 4], &@as([4]u8, @bitCast(scale * E2M1_LUT[@as(usize, low)])));
-        @memcpy(output[(i * 2 + 1) * 4 .. (i * 2 + 1) * 4 + 4], &@as([4]u8, @bitCast(scale * E2M1_LUT[@as(usize, high)])));
+        const value = [2]f32{
+            scale * E2M1_LUT[@as(usize, low)],
+            scale * E2M1_LUT[@as(usize, high)],
+        };
+        const bytes: *const [8]u8 = @ptrCast(&value);
+        @memcpy(output[i * 8 .. (i + 1) * 8], bytes);
     }
 }
 
