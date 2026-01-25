@@ -87,7 +87,11 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
-    exe.lto = .full;
+
+    // FIXME: LLD has troubles for Apple M2 with LTO: using LLD to link macho files is unsupported
+    if (target.result.cpu.arch.isX86()) {
+        exe.lto = .full;
+    }
     exe.root_module.addImport("zbench", zbench_module);
 
     const emitted_asm = exe.getEmittedAsm();
